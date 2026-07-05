@@ -28,10 +28,11 @@ class Settings(BaseSettings):
     # MODE TEST — accélération du temps, pilotable À CHAUD depuis l'app.
     # time_factor = vitesse AU DÉMARRAGE (1.0 = temps réel).
     # Quand on active l'accéléré (bouton app) : facteur -> accel_factor, cadence
-    # scheduler -> accel_tick_seconds. 288 = 5 min réelles valent 1 jour.
+    # scheduler -> accel_tick_seconds. 600 = 2,4 min réelles valent 1 jour ; à cette
+    # vitesse la fenêtre de rappel (55 min virt.) dure ~5,5 s réelles -> tick à 5 s.
     time_factor: float = 1.0
-    accel_factor: float = 288.0
-    accel_tick_seconds: int = 8
+    accel_factor: float = 600.0
+    accel_tick_seconds: int = 5
 
 
 settings = Settings()

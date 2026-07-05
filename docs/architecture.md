@@ -19,19 +19,22 @@
         │   pioche dans TOUTES les briques : quand relancer ? quoi dire ?           │
         └───────────────────────────────────────┬──────────────────────────────────┘
                                                  │
-   ┌─────────────┬─────────────┬────────────┬───┴────────┬──────────────┬─────────────┐
-   │ 1. PERSO    │ 2. ALIMEN-  │ 3. PROGRAMME│ 4. EVENTS  │ 5. SUIVI /   │ 6. OBJECTIFS│
-   │    COACH    │    TATION   │    GYM      │ (blessures,│  PROGRESSION │  & JALONS   │
-   │             │             │             │  vie...)   │  / ADHÉRENCE │             │
-   └─────────────┴─────────────┴────────────┴────────────┴──────────────┴─────────────┘
+   LES BRIQUES DE CONTENU (mêmes niveau) :
+     1. Personnalité coach     4. Santé (sommeil, médical, compléments)
+     2. Alimentation           5. Events (blessures ponctuelles, vie...)
+     3. Programme gym          6. Suivi / progression / adhérence  ⭐
+                               7. Objectifs & jalons
                                                  │
         ┌──────────────────── FONDATIONS (le socle) ───────────────────────────────┐
-        │   🧠 MÉMOIRE (le cerveau qui relie tout)   ·   🛡️ SÉCURITÉ / SANTÉ         │
+        │   🧠 MÉMOIRE (le cerveau qui relie tout)   ·   🛡️ SÉCURITÉ & ÉTHIQUE       │
+        │                                              (garde-fous transversaux)     │
         └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-Principe : les **briques** = les domaines. Le **moteur de relances** = transversal (une
-seule logique, pas dupliquée). Les **fondations** = sous tout le reste.
+Principe : les **briques** = les domaines (au même niveau). Le **moteur de relances** =
+transversal (une seule logique, pas dupliquée). Les **fondations** = sous tout le reste.
+⚠️ Ne pas confondre la **brique Santé** (le domaine : données, sommeil, compléments) et la
+**fondation Sécurité & éthique** (les règles/garde-fous qui protègent, notamment, cette brique).
 
 ---
 
@@ -47,12 +50,14 @@ Ce qui fait que le coach "te connaît" à travers toutes les briques.
 - ⬜ **Détection de patterns** ("quand tu dors mal, tu pars en vrille").
 - ⬜ Vectoriel (couche 3) quand l'historique sera long.
 
-### 🛡️ Sécurité / santé — garde-fous · 🔶
+### 🛡️ Sécurité & éthique — garde-fous transversaux · 🔶
 
-Critique pour une app de santé (et surtout quand on ajoutera l'alimentation).
+Les *règles* qui s'appliquent partout (à ne pas confondre avec la brique Santé, qui est le
+*domaine*). Critique pour une app de santé.
 - ✅ Garde-fous dans la persona (pas médecin, pas d'entraînement blessé, pas minceur=
   valeur, pas de comportements extrêmes, pas de remplacement d'aide médicale/psy…).
-- ⬜ Garde-fous **alimentation** (TCA, restrictions dangereuses) — à durcir avec la brique.
+- ⬜ Garde-fous **alimentation & santé** (TCA, restrictions dangereuses, pas de diagnostic,
+  pas de dosage précis de compléments) — à durcir avec ces briques.
 - ⬜ Conformité **RGPD** (données de santé) dès de vrais users.
 - ⬜ Validation signature Twilio (webhook).
 
@@ -84,12 +89,29 @@ motivation, modes tribunal/infirmerie, recadrages (guerre, ego), Chef/Soldat.
 - ⬜ Enrichir la bibliothèque de templates + liste d'exos avec alternatives.
 - ⬜ Faire relire par un coach diplômé avant prod.
 
-### 4. Events (blessures, vie...) · ✅
+### 4. Santé · ⬜ (sensible — plus tard, avec soin)
 
-- ✅ Table `events` en SCD2 : statut qui évolue (malade→amélioration→résolu). Santé,
-  blessure, perso, boulot, moral, victoire. Prise de news, adaptation du programme.
+Le domaine santé au sens large (≠ alimentation, ≠ events ponctuels). C'était **l'idée
+d'origine** du projet (analyses sanguines → compléments). **Brique la plus sensible** du
+produit (quasi-médical).
+- ⬜ **Bien-être quotidien** : sommeil (qualité/durée), énergie, stress, moral — ces
+  signaux modulent l'entraînement (fatigue → mode infirmerie, etc.).
+- ⬜ **Données médicales / analyses** : upload d'analyses sanguines, bilans → lecture et
+  mise en contexte (⚠️ JAMAIS de diagnostic).
+- ⬜ **Compléments alimentaires** : recommandations selon analyses/objectifs (⚠️ zone
+  sensible : disclaimers, jamais de dosage précis, orienter vers un pro de santé).
+- ⬜ **Conditions & limitations médicales** : pathologies, contre-indications, blessures
+  chroniques → contraintes fortes pour le programme et l'alimentation.
+- 🛡️ Encadrée strictement par la fondation Sécurité & éthique. Idéalement relue par un pro
+  de santé avant toute mise en prod.
 
-### 5. ⭐ Suivi / progression / adhérence · 🔶 (LA brique de rétention)
+### 5. Events (blessures ponctuelles, vie...) · ✅
+
+Le mécanisme de mémoire **épisodique** (≠ brique Santé, qui est le domaine ongoing).
+- ✅ Table `events` en SCD2 : statut qui évolue (malade→amélioration→résolu). Blessure
+  ponctuelle, perso, boulot, moral, victoire. Prise de news, adaptation du programme.
+
+### 6. ⭐ Suivi / progression / adhérence · 🔶 (LA brique de rétention)
 
 Ce que l'utilisateur FAIT vraiment (≠ ce que le coach dit/sait). **Le cœur pour une
 audience qui abandonne** — et la source de presque toutes les relances.
@@ -100,7 +122,7 @@ audience qui abandonne** — et la source de presque toutes les relances.
 - ⬜ **Photos** de progression.
 - Alimente : les débriefs de séance, les félicitations, les relances de recadrage.
 
-### 6. Objectifs & jalons · 🔶
+### 7. Objectifs & jalons · 🔶
 
 - ✅ `goals` : objectifs + motivations (le "pourquoi", levier n°1).
 - ⬜ **Jalons / échéances** : la deadline (ex : mariage le 7 fév) → urgence et compte à
@@ -136,6 +158,7 @@ par défaut. C'est le point d'ancrage du moteur.
 2. 🔶 **Suivi / progression / adhérence** (LA rétention) + **jalons** — prochaine priorité
 3. ⬜ **Moteur proactif** (relances/triggers) — exploite 1 & 2
 4. ⬜ Grades relationnels + dévoilement progressif
-5. ⬜ Alimentation (brique + garde-fous)
+5. ⬜ **Alimentation + Santé** (briques sensibles : garde-fous renforcés, pas de
+   diagnostic/dosage, relecture par un pro de santé)
 6. ⬜ Sortie du sandbox (WhatsApp Business) + always-on + RGPD → vrais users
 7. ⬜ Monétisation (web + Stripe, puis app native)

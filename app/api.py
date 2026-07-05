@@ -11,6 +11,8 @@ from datetime import date, datetime, timezone
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from . import clock
+from .config import settings
 from .db import (
     active_events,
     current_program,
@@ -35,6 +37,17 @@ router = APIRouter(prefix="/api")
 class ChatIn(BaseModel):
     user: str  # identifiant utilisateur, ex. "app:yehouda"
     message: str
+
+
+@router.get("/clock")
+def clock_now() -> dict:
+    """Heure courante du backend (virtuelle si le temps est accéléré) + facteur.
+    Sert à afficher la date/heure qui défile en haut de l'app en mode test."""
+    return {
+        "now": now_local().replace(microsecond=0).isoformat(),
+        "factor": settings.time_factor,
+        "accelerated": settings.time_factor != 1.0,
+    }
 
 
 @router.post("/chat")
@@ -89,7 +102,7 @@ def dashboard(user: str) -> dict:
     jours_depuis = None
     if lw is not None:
         try:
-            jours_depuis = (datetime.now(timezone.utc)
+            jours_depuis = (clock.now_utc()
                             - datetime.fromisoformat(lw["performed_at"])).days
         except Exception:  # noqa: BLE001
             jours_depuis = None

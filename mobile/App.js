@@ -97,6 +97,37 @@ function Chat() {
   );
 }
 
+function ClockBadge() {
+  // On récupère l'heure du backend (virtuelle si temps accéléré) + le facteur,
+  // puis on la fait avancer localement chaque seconde, avec resync toutes les 30s.
+  const [base, setBase] = useState(null);
+  const [now, setNow] = useState(null);
+
+  const sync = useCallback(async () => {
+    try {
+      const d = await api('/api/clock');
+      setBase({ serverMs: new Date(d.now).getTime(), fetchedAt: Date.now(), factor: d.factor || 1 });
+    } catch (e) { /* backend pas encore à jour : badge masqué */ }
+  }, []);
+
+  useEffect(() => { sync(); const t = setInterval(sync, 30000); return () => clearInterval(t); }, [sync]);
+  useEffect(() => {
+    const t = setInterval(() => {
+      setBase((b) => {
+        if (b) setNow(new Date(b.serverMs + (Date.now() - b.fetchedAt) * b.factor));
+        return b;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!now) return null;
+  const jour = now.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' });
+  const heure = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const warp = base && base.factor !== 1;
+  return <Text style={styles.clock}>{warp ? '⏩ ' : '🕐 '}{jour} · {heure}{warp ? `  (x${base.factor})` : ''}</Text>;
+}
+
 function Card({ title, children }) {
   return (
     <View style={styles.card}>
@@ -188,7 +219,10 @@ export default function App() {
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
-      <View style={styles.header}><Text style={styles.headerTxt}>🎖️ Le Sergent</Text></View>
+      <View style={styles.header}>
+        <Text style={styles.headerTxt}>🎖️ Le Sergent</Text>
+        <ClockBadge />
+      </View>
       <View style={{ flex: 1 }}>{tab === 'chat' ? <Chat /> : <Dashboard />}</View>
       {!(kbd && tab === 'chat') && (
         <View style={styles.tabs}>
@@ -209,6 +243,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f5f5f0' },
   header: { backgroundColor: OLIVE, paddingVertical: 14, alignItems: 'center' },
   headerTxt: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  clock: { color: '#dfe6c8', fontSize: 12, marginTop: 2, fontVariant: ['tabular-nums'] },
   chat: { flex: 1, paddingHorizontal: 12 },
   bubble: { maxWidth: '82%', padding: 10, borderRadius: 14, marginVertical: 4 },
   user: { alignSelf: 'flex-end', backgroundColor: OLIVE },

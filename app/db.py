@@ -125,6 +125,15 @@ def init_db() -> None:
                 created_at   TEXT NOT NULL
             );
 
+            -- JOURNAL des messages proactifs envoyés (anti-répétition / cooldown).
+            CREATE TABLE IF NOT EXISTS proactive_log (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id  INTEGER NOT NULL REFERENCES users(id),
+                kind     TEXT NOT NULL,   -- 'inactivity','milestone','event_news'...
+                ref      TEXT NOT NULL DEFAULT '',  -- clé (ex: event_key, label jalon)
+                sent_at  TEXT NOT NULL
+            );
+
             -- SÉANCES PRÉVUES (futures) : socle du moteur proactif (rappel + débrief).
             CREATE TABLE IF NOT EXISTS planned_sessions (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,6 +188,7 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_workouts_user ON workouts(user_id, performed_at);
             CREATE INDEX IF NOT EXISTS idx_miles_user    ON milestones(user_id, target_date);
             CREATE INDEX IF NOT EXISTS idx_planned       ON planned_sessions(status, scheduled_at);
+            CREATE INDEX IF NOT EXISTS idx_prolog        ON proactive_log(user_id, kind, ref, sent_at);
             """
         )
         # Migration douce : ajoute coach_id aux bases déjà créées avant cette colonne.
@@ -478,6 +488,34 @@ def mark_debrief_sent(planned_id: int) -> None:
             "UPDATE planned_sessions SET debrief_sent = 1, status = 'done' "
             "WHERE id = ?", (planned_id,)
         )
+
+
+# --- Journal proactif (anti-répétition) + utilisateurs actifs ---------------
+
+def recently_sent(user_id: int, kind: str, ref: str, cooldown_hours: int) -> bool:
+    """A-t-on déjà envoyé ce type de relance (même ref) dans la fenêtre de cooldown ?"""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=cooldown_hours)).isoformat()
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT 1 FROM proactive_log WHERE user_id = ? AND kind = ? AND ref = ? "
+            "AND sent_at >= ? LIMIT 1",
+            (user_id, kind, ref, cutoff),
+        ).fetchone() is not None
+
+
+def log_proactive(user_id: int, kind: str, ref: str = "") -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO proactive_log (user_id, kind, ref, sent_at) VALUES (?, ?, ?, ?)",
+            (user_id, kind, ref, _now()),
+        )
+
+
+def active_users() -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT id, wa_id, coach_id, state FROM users WHERE state = 'active'"
+        ).fetchall()
 
 
 # --- Mémoire : events --------------------------------------------------------

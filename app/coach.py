@@ -216,23 +216,42 @@ def generate_reply(user: sqlite3.Row, history: list[dict]) -> str:
     return (response.choices[0].message.content or "").strip()
 
 
-def generate_proactive(user: sqlite3.Row, kind: str) -> str:
-    """Génère un message PROACTIF (le coach écrit en PREMIER) dans sa voix.
+_PROACTIVE_INSTR = {
+    "reminder": (
+        "TU ÉCRIS EN PREMIER — RAPPEL DE SÉANCE. La personne ne t'a rien demandé, "
+        "c'est toi qui l'interpelles : sa prochaine séance approche. Rappelle-lui d'y "
+        "aller, cash et motivant, dans TA voix, et rappelle brièvement ce qu'elle est "
+        "censée faire (cf. son programme). Court et qui claque."
+    ),
+    "debrief": (
+        "TU ÉCRIS EN PREMIER — DÉBRIEF POST-SÉANCE. Sa séance vient de passer : "
+        "demande, dans TA voix, comment ça s'est passé (si elle l'a faite ou pas), puis "
+        "ENCHAÎNE en lui demandant c'est quand sa PROCHAINE séance. Court."
+    ),
+    "inactivity": (
+        "TU ÉCRIS EN PREMIER — RELANCE D'ASSIDUITÉ. Ça fait un moment qu'il n'a pas "
+        "bougé (cf. suivi). Interpelle-le : demande-lui combien de séances il a faites, "
+        "secoue-le à ta sauce (mode tribunal si ça sent la flemme, mais reste humain si "
+        "c'est une vraie galère), et fais-lui fixer sa prochaine séance. Court."
+    ),
+    "milestone": (
+        "TU ÉCRIS EN PREMIER — COMPTE À REBOURS. Pour raviver la flamme, rappelle-lui "
+        "combien de temps il reste avant son jalon (cf. contexte) et relie-le à "
+        "l'action maintenant. Motivant, dans TA voix. Court."
+    ),
+    "event_news": (
+        "TU ÉCRIS EN PREMIER — PRISE DE NOUVELLES. Prends des news, en vrai pote, de ce "
+        "dont il t'a parlé (voir le détail ci-dessous). Est-ce que ça va mieux ? "
+        "Sincère ; pas de vanne si c'est sérieux (santé, moral). Court."
+    ),
+}
 
-    kind = 'reminder' (juste avant la séance) | 'debrief' (juste après)."""
-    if kind == "reminder":
-        instr = (
-            "TU ÉCRIS EN PREMIER — RAPPEL DE SÉANCE. La personne ne t'a rien demandé, "
-            "c'est toi qui l'interpelles : sa prochaine séance approche. Rappelle-lui "
-            "d'y aller, cash et motivant, dans TA voix, et rappelle brièvement ce "
-            "qu'elle est censée faire (cf. son programme). Court et qui claque."
-        )
-    else:  # debrief
-        instr = (
-            "TU ÉCRIS EN PREMIER — DÉBRIEF POST-SÉANCE. Sa séance vient de passer : "
-            "demande, dans TA voix, comment ça s'est passé (si elle l'a faite ou pas), "
-            "puis ENCHAÎNE en lui demandant c'est quand sa PROCHAINE séance. Court."
-        )
+
+def generate_proactive(user: sqlite3.Row, kind: str, detail: str | None = None) -> str:
+    """Génère un message PROACTIF (le coach écrit en PREMIER) dans sa voix."""
+    instr = _PROACTIVE_INSTR.get(kind, _PROACTIVE_INSTR["inactivity"])
+    if detail:
+        instr += f"\nÀ évoquer précisément : {detail}"
     system = "\n\n".join(
         [COMMON_RULES, coach_persona(user["coach_id"]), instr, _dynamic_context(user)]
     )

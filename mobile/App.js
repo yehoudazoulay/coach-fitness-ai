@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   SafeAreaView, View, Text, TextInput, TouchableOpacity, ScrollView,
-  ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform,
+  ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform, Keyboard,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
@@ -24,7 +24,10 @@ function Chat() {
   const load = useCallback(async () => {
     try {
       const data = await api(`/api/${encodeURIComponent(USER)}/messages?limit=100`);
-      setMessages(data.messages || []);
+      const server = data.messages || [];
+      // Ne JAMAIS rétrécir l'affichage (évite le "chat qui s'efface" si le poll
+      // arrive avant que le serveur ait enregistré le dernier échange).
+      setMessages((prev) => (server.length < prev.length ? prev : server));
     } catch (e) { /* réseau : on garde l'affichage courant */ }
   }, []);
 
@@ -51,7 +54,11 @@ function Chat() {
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 50 : 0}
+    >
       <ScrollView
         ref={scrollRef}
         style={styles.chat}
@@ -161,19 +168,31 @@ function Dashboard() {
 
 export default function App() {
   const [tab, setTab] = useState('chat');
+  const [kbd, setKbd] = useState(false);
+
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const s = Keyboard.addListener(showEvt, () => setKbd(true));
+    const h = Keyboard.addListener(hideEvt, () => setKbd(false));
+    return () => { s.remove(); h.remove(); };
+  }, []);
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
       <View style={styles.header}><Text style={styles.headerTxt}>🎖️ Le Sergent</Text></View>
       <View style={{ flex: 1 }}>{tab === 'chat' ? <Chat /> : <Dashboard />}</View>
-      <View style={styles.tabs}>
-        <TouchableOpacity style={[styles.tab, tab === 'chat' && styles.tabActive]} onPress={() => setTab('chat')}>
-          <Text style={[styles.tabTxt, tab === 'chat' && styles.tabTxtActive]}>💬 Chat</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.tab, tab === 'dashboard' && styles.tabActive]} onPress={() => setTab('dashboard')}>
-          <Text style={[styles.tabTxt, tab === 'dashboard' && styles.tabTxtActive]}>📊 Suivi</Text>
-        </TouchableOpacity>
-      </View>
+      {!(kbd && tab === 'chat') && (
+        <View style={styles.tabs}>
+          <TouchableOpacity style={[styles.tab, tab === 'chat' && styles.tabActive]} onPress={() => setTab('chat')}>
+            <Text style={[styles.tabTxt, tab === 'chat' && styles.tabTxtActive]}>💬 Chat</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.tab, tab === 'dashboard' && styles.tabActive]} onPress={() => setTab('dashboard')}>
+            <Text style={[styles.tabTxt, tab === 'dashboard' && styles.tabTxtActive]}>📊 Suivi</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }

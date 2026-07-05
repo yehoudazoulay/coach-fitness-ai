@@ -8,8 +8,20 @@ toucher au reste du code (seules ces fonctions changent).
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from .config import settings
+
+
+def now_local() -> datetime:
+    """Heure actuelle dans le fuseau des utilisateurs (naïve, pour comparer aux
+    heures locales stockées)."""
+    return datetime.now(ZoneInfo(settings.timezone)).replace(tzinfo=None)
+
+
+def fmt_local(dt: datetime) -> str:
+    """Formate une heure locale en 'YYYY-MM-DDTHH:MM' (précision minute)."""
+    return dt.strftime("%Y-%m-%dT%H:%M")
 
 # États du parcours utilisateur (voir le plan global).
 STATE_ONBOARDING = "onboarding"  # découverte en cours
@@ -113,6 +125,18 @@ def init_db() -> None:
                 created_at   TEXT NOT NULL
             );
 
+            -- SÉANCES PRÉVUES (futures) : socle du moteur proactif (rappel + débrief).
+            CREATE TABLE IF NOT EXISTS planned_sessions (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id       INTEGER NOT NULL REFERENCES users(id),
+                scheduled_at  TEXT NOT NULL,   -- heure LOCALE naïve 'YYYY-MM-DDTHH:MM'
+                session_name  TEXT,
+                reminder_sent INTEGER NOT NULL DEFAULT 0,
+                debrief_sent  INTEGER NOT NULL DEFAULT 0,
+                status        TEXT NOT NULL DEFAULT 'planned',  -- planned/done/cancelled
+                created_at    TEXT NOT NULL
+            );
+
             -- JALONS : échéances datées importantes (mariage, compétition...).
             CREATE TABLE IF NOT EXISTS milestones (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,6 +178,7 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_meas_user     ON measurements(user_id, metric);
             CREATE INDEX IF NOT EXISTS idx_workouts_user ON workouts(user_id, performed_at);
             CREATE INDEX IF NOT EXISTS idx_miles_user    ON milestones(user_id, target_date);
+            CREATE INDEX IF NOT EXISTS idx_planned       ON planned_sessions(status, scheduled_at);
             """
         )
         # Migration douce : ajoute coach_id aux bases déjà créées avant cette colonne.
@@ -376,6 +401,83 @@ def upcoming_milestones(user_id: int) -> list[sqlite3.Row]:
             "AND target_date >= ? ORDER BY target_date",
             (user_id, today),
         ).fetchall()
+
+
+# --- Séances prévues (moteur proactif) --------------------------------------
+
+def add_planned_session(
+    user_id: int, scheduled_at: str, session_name: str | None = None,
+) -> int:
+    """Enregistre la prochaine séance. Annule les séances prévues encore en
+    attente (une seule "prochaine séance" active à la fois)."""
+    now = _now()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE planned_sessions SET status = 'cancelled' "
+            "WHERE user_id = ? AND status = 'planned'",
+            (user_id,),
+        )
+        cur = conn.execute(
+            "INSERT INTO planned_sessions (user_id, scheduled_at, session_name, "
+            "created_at) VALUES (?, ?, ?, ?)",
+            (user_id, scheduled_at, session_name, now),
+        )
+        return cur.lastrowid
+
+
+def next_planned_session(user_id: int) -> sqlite3.Row | None:
+    """La prochaine séance prévue encore active."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT id, scheduled_at, session_name, reminder_sent, debrief_sent "
+            "FROM planned_sessions WHERE user_id = ? AND status = 'planned' "
+            "ORDER BY scheduled_at LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+
+def due_reminders(now_iso: str, window_min: int = 45) -> list[sqlite3.Row]:
+    """Séances qui commencent bientôt (dans la fenêtre) et pas encore rappelées.
+    Renvoie aussi le wa_id pour l'envoi."""
+    horizon = fmt_local(datetime.fromisoformat(now_iso) + timedelta(minutes=window_min))
+    grace = fmt_local(datetime.fromisoformat(now_iso) - timedelta(minutes=10))
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT p.id, p.user_id, p.scheduled_at, p.session_name, u.wa_id "
+            "FROM planned_sessions p JOIN users u ON u.id = p.user_id "
+            "WHERE p.status = 'planned' AND p.reminder_sent = 0 "
+            "AND p.scheduled_at <= ? AND p.scheduled_at >= ?",
+            (horizon, grace),
+        ).fetchall()
+
+
+def due_debriefs(now_iso: str, after_min: int = 120) -> list[sqlite3.Row]:
+    """Séances passées depuis > after_min, pas encore débriefées (fenêtre 24h)."""
+    cutoff = fmt_local(datetime.fromisoformat(now_iso) - timedelta(minutes=after_min))
+    floor = fmt_local(datetime.fromisoformat(now_iso) - timedelta(hours=24))
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT p.id, p.user_id, p.scheduled_at, p.session_name, u.wa_id "
+            "FROM planned_sessions p JOIN users u ON u.id = p.user_id "
+            "WHERE p.status = 'planned' AND p.debrief_sent = 0 "
+            "AND p.scheduled_at <= ? AND p.scheduled_at >= ?",
+            (cutoff, floor),
+        ).fetchall()
+
+
+def mark_reminder_sent(planned_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE planned_sessions SET reminder_sent = 1 WHERE id = ?", (planned_id,)
+        )
+
+
+def mark_debrief_sent(planned_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE planned_sessions SET debrief_sent = 1, status = 'done' "
+            "WHERE id = ?", (planned_id,)
+        )
 
 
 # --- Mémoire : events --------------------------------------------------------

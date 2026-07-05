@@ -20,5 +20,9 @@ class Settings(BaseSettings):
     # Base de données
     database_path: str = "coach.db"
 
+    # Proactif
+    timezone: str = "Europe/Brussels"  # fuseau des utilisateurs (rappels à l'heure locale)
+    proactive_enabled: bool = True  # moteur de relances (rappels/débriefs) actif
+
 
 settings = Settings()

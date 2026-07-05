@@ -24,7 +24,9 @@ from .db import (
     add_goal,
     add_measurement,
     add_milestone,
+    add_planned_session,
     current_program,
+    fmt_local,
     get_facts,
     get_goals,
     get_milestones,
@@ -32,6 +34,8 @@ from .db import (
     latest_measurements,
     log_workout,
     measurement_history,
+    next_planned_session,
+    now_local,
     save_new_program,
     sessions_this_week,
     update_event,
@@ -139,6 +143,17 @@ def _dynamic_context(user: sqlite3.Row) -> str:
         parts.append("SUIVI / ASSIDUITÉ (débriefe, félicite ou secoue selon) :\n"
                      + "\n".join("- " + x for x in suivi))
 
+    # Prochaine séance prévue (base des rappels) — sinon, demande-la.
+    if user["state"] == STATE_ACTIVE:
+        nps = next_planned_session(user["id"])
+        if nps is not None:
+            quand = nps["scheduled_at"].replace("T", " à ")
+            quoi = f" ({nps['session_name']})" if nps["session_name"] else ""
+            parts.append(f"PROCHAINE SÉANCE PRÉVUE : {quand}{quoi}.")
+        else:
+            parts.append("PAS DE PROCHAINE SÉANCE PRÉVUE : demande-lui, de toi-même, "
+                         "c'est quand sa prochaine séance, pour pouvoir la lui rappeler.")
+
     # Jalons à venir (compte à rebours).
     ms = upcoming_milestones(user["id"])
     if ms:
@@ -197,6 +212,37 @@ def generate_reply(user: sqlite3.Row, history: list[dict]) -> str:
         model=settings.openai_model,
         max_tokens=400,  # messages WhatsApp courts et qui claquent
         messages=messages,
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
+def generate_proactive(user: sqlite3.Row, kind: str) -> str:
+    """Génère un message PROACTIF (le coach écrit en PREMIER) dans sa voix.
+
+    kind = 'reminder' (juste avant la séance) | 'debrief' (juste après)."""
+    if kind == "reminder":
+        instr = (
+            "TU ÉCRIS EN PREMIER — RAPPEL DE SÉANCE. La personne ne t'a rien demandé, "
+            "c'est toi qui l'interpelles : sa prochaine séance approche. Rappelle-lui "
+            "d'y aller, cash et motivant, dans TA voix, et rappelle brièvement ce "
+            "qu'elle est censée faire (cf. son programme). Court et qui claque."
+        )
+    else:  # debrief
+        instr = (
+            "TU ÉCRIS EN PREMIER — DÉBRIEF POST-SÉANCE. Sa séance vient de passer : "
+            "demande, dans TA voix, comment ça s'est passé (si elle l'a faite ou pas), "
+            "puis ENCHAÎNE en lui demandant c'est quand sa PROCHAINE séance. Court."
+        )
+    system = "\n\n".join(
+        [COMMON_RULES, coach_persona(user["coach_id"]), instr, _dynamic_context(user)]
+    )
+    response = _client.chat.completions.create(
+        model=settings.openai_model,
+        max_tokens=300,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": "[Déclencheur automatique : écris ton message.]"},
+        ],
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -273,11 +319,12 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
     known_mi = "\n".join(
         f'- {m["label"]} ({m["target_date"]})' for m in mi
     ) or "(aucun)"
-    today = datetime.now(timezone.utc).date().isoformat()
+    maintenant = fmt_local(now_local())
 
     system = (
         "Tu tiens à jour la mémoire d'un coach sur son client, depuis son DERNIER "
-        f"message. Date du jour : {today}. Tu ROUTES l'info entre ces catégories :\n\n"
+        f"message. Date et heure locales actuelles : {maintenant}. Tu ROUTES "
+        "l'info entre ces catégories :\n\n"
         "GOALS = ce qu'il VEUT atteindre (type 'objectif') et POURQUOI, son "
         "déclencheur profond (type 'motivation'). C'est le cœur du coaching.\n"
         "EVENTS = épisodique, ça arrive puis ça passe, statut qui évolue (malade, "
@@ -291,9 +338,12 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
         "MILESTONES = une échéance DATÉE importante (mariage, compétition, deadline "
         "d'objectif). label + target_date au format AAAA-MM-JJ (résous les dates "
         "relatives/ambiguës avec la date du jour).\n"
+        "NEXT_SESSION = la PROCHAINE séance qu'il PRÉVOIT de faire (future, pas encore "
+        "faite) : scheduled_at à l'heure locale AAAA-MM-JJTHH:MM (résous 'demain 18h', "
+        "'ce soir', 'jeudi', 'dans 2h' avec l'heure actuelle) + session_name (optionnel).\n"
         "Règles : ce qu'il veut/pourquoi -> goal ; début/fin/statut -> event ; "
-        "permanent/récurrent -> fact ; chiffre du corps -> mesure ; séance faite -> "
-        "workout ; échéance datée -> milestone.\n\n"
+        "permanent/récurrent -> fact ; chiffre du corps -> mesure ; séance FAITE -> "
+        "workout ; séance PRÉVUE -> next_session ; échéance datée -> milestone.\n\n"
         "Pour chaque catégorie tu peux CRÉER ou METTRE À JOUR l'existant (ne "
         "duplique pas : si ça évolue, mets à jour via l'id). IGNORE le trivial.\n\n"
         "Objectifs/motivations connus :\n" + known_go + "\n\n"
@@ -314,7 +364,9 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
         ' "new_measurements": [{"metric": "poids|taille|taux_gras|tour_bras|'
         'tour_taille|...", "value": <nombre>, "unit": "kg|cm|%"}],\n'
         ' "new_workouts": [{"session_name": "...", "feeling": "...", "notes": "..."}],\n'
-        ' "new_milestones": [{"label": "...", "target_date": "AAAA-MM-JJ"}]}\n'
+        ' "new_milestones": [{"label": "...", "target_date": "AAAA-MM-JJ"}],\n'
+        ' "next_session": {"scheduled_at": "AAAA-MM-JJTHH:MM", "session_name": "..."}}\n'
+        "(next_session = null si aucune séance future n'est annoncée dans le message). "
         "Listes vides si rien. Le texte fourni contient les derniers échanges pour "
         "le CONTEXTE ; n'extrais que ce qu'apporte le TOUT DERNIER message de "
         "l'utilisateur."
@@ -379,6 +431,14 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
         if label and td:
             add_milestone(user_id, label, td)
             changes.append({"action": "milestone+", "label": label, "date": td})
+    ns = data.get("next_session")
+    if ns and ns.get("scheduled_at"):
+        try:
+            at = fmt_local(datetime.fromisoformat(ns["scheduled_at"]))
+            add_planned_session(user_id, at, ns.get("session_name"))
+            changes.append({"action": "next_session", "at": at})
+        except Exception:  # noqa: BLE001
+            pass
     return changes
 
 

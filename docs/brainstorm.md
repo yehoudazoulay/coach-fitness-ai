@@ -248,6 +248,7 @@ PLUS TARD    Couche 3 (vectoriel) quand l'historique sera long
 
 ### Mémoire / data
 
+- ⬜ **Suivi du SOMMEIL** comme donnée à part entière : à récolter en découverte (durée/qualité habituelle) PUIS à suivre dans le temps (couché tôt/tard, nuits courtes) — dans `measurements` (metric `sommeil`) ou une table dédiée. Sert au coaching (récup, énergie) et à la détection de patterns ("quand tu dors mal, tu pars en vrille").
 - ⬜ **DB vectorielle** (couche 3) : rappel sémantique fin, quand l'historique sera long.
 
 ### Infra / business

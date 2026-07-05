@@ -83,6 +83,14 @@ def _condition_nudge(user) -> None:
     """Une relance conditionnelle max par utilisateur (par priorité + cooldown)."""
     uid = user["id"]
 
+    # GARDE-FOU : tant que l'utilisateur n'a pas fait sa PREMIÈRE séance, on ne
+    # lance AUCUNE relance conditionnelle (ni news, ni inactivité, ni jalon). Il
+    # n'y a que les rappels/débriefs de séances programmées. Ça évite les prises
+    # de news prématurées ("ça va mieux ton X ?") avant même d'avoir commencé.
+    lw = last_workout(uid)
+    if lw is None:
+        return
+
     # 1. Prise de news sur un event santé/blessure/moral non résolu, âgé de >= 2 jours.
     for e in active_events(uid):
         if e["kind"] in ("sante", "blessure", "moral", "perso") \
@@ -91,9 +99,8 @@ def _condition_nudge(user) -> None:
                 _send_nudge(user, "event_news", str(e["event_key"]), e["content"])
                 return
 
-    # 2. Inactivité : aucune séance ou dernière séance il y a >= 4 jours.
-    lw = last_workout(uid)
-    if (lw is None or _days_since(lw["performed_at"]) >= 4) \
+    # 2. Inactivité : dernière séance il y a >= 4 jours.
+    if _days_since(lw["performed_at"]) >= 4 \
             and not recently_sent(uid, "inactivity", "", 48):
         _send_nudge(user, "inactivity")
         return

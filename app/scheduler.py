@@ -144,13 +144,23 @@ def tick() -> None:
             log.exception("Erreur relance conditionnelle pour %s", user["wa_id"])
 
 
+def set_tick_seconds(seconds: int) -> None:
+    """Change la cadence du scheduler à chaud (rapide en accéléré, lente en normal)."""
+    secs = max(5, int(seconds))
+    try:
+        scheduler.reschedule_job("proactive_tick", trigger="interval", seconds=secs)
+        log.info("Cadence scheduler -> %ss.", secs)
+    except Exception:  # noqa: BLE001
+        log.exception("Impossible de re-planifier le tick")
+
+
 def start() -> None:
     scheduler.start()
     if settings.proactive_enabled:
         secs = max(5, settings.tick_seconds)
         scheduler.add_job(tick, "interval", seconds=secs, id="proactive_tick")
-        extra = f" — temps ACCÉLÉRÉ x{settings.time_factor:g}" \
-            if settings.time_factor != 1.0 else ""
+        extra = f" — temps ACCÉLÉRÉ x{clock.get_factor():g}" \
+            if clock.get_factor() != 1.0 else ""
         log.info("Moteur proactif ACTIF (tick toutes les %ss)%s.", secs, extra)
     else:
         log.info("Moteur proactif désactivé (proactive_enabled=false).")

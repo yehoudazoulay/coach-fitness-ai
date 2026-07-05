@@ -97,20 +97,22 @@ function Chat() {
   );
 }
 
-function ClockBadge() {
-  // On récupère l'heure du backend (virtuelle si temps accéléré) + le facteur,
-  // puis on la fait avancer localement chaque seconde, avec resync toutes les 30s.
+function ClockBar() {
+  // Heure du backend (virtuelle si accéléré) qu'on fait avancer localement chaque
+  // seconde, + un bouton pour basculer accéléré ⇄ normal à chaud.
   const [base, setBase] = useState(null);
   const [now, setNow] = useState(null);
+  const [accel, setAccel] = useState(null);
 
   const sync = useCallback(async () => {
     try {
       const d = await api('/api/clock');
       setBase({ serverMs: new Date(d.now).getTime(), fetchedAt: Date.now(), factor: d.factor || 1 });
-    } catch (e) { /* backend pas encore à jour : badge masqué */ }
+      setAccel(!!d.accelerated);
+    } catch (e) { /* backend pas encore à jour */ }
   }, []);
 
-  useEffect(() => { sync(); const t = setInterval(sync, 30000); return () => clearInterval(t); }, [sync]);
+  useEffect(() => { sync(); const t = setInterval(sync, 15000); return () => clearInterval(t); }, [sync]);
   useEffect(() => {
     const t = setInterval(() => {
       setBase((b) => {
@@ -121,11 +123,32 @@ function ClockBadge() {
     return () => clearInterval(t);
   }, []);
 
-  if (!now) return null;
-  const jour = now.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' });
-  const heure = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const warp = base && base.factor !== 1;
-  return <Text style={styles.clock}>{warp ? '⏩ ' : '🕐 '}{jour} · {heure}{warp ? `  (x${base.factor})` : ''}</Text>;
+  const toggle = async () => {
+    const next = !accel;
+    setAccel(next);
+    try {
+      await api('/api/clock/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accelerated: next }),
+      });
+      sync();
+    } catch (e) { setAccel(!next); /* échec : on revient */ }
+  };
+
+  const jour = now ? now.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' }) : '—';
+  const heure = now ? now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+
+  return (
+    <View style={styles.clockBar}>
+      <Text style={styles.clock}>{accel ? '⏩ ' : '🕐 '}{jour} · {heure}</Text>
+      {accel !== null && (
+        <TouchableOpacity onPress={toggle} style={[styles.warpBtn, accel && styles.warpOn]}>
+          <Text style={[styles.warpTxt, accel && styles.warpTxtOn]}>{accel ? `Accéléré ×${base?.factor ?? ''}` : 'Passer en accéléré'}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 }
 
 function Card({ title, children }) {
@@ -221,7 +244,7 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.headerTxt}>🎖️ Le Sergent</Text>
-        <ClockBadge />
+        <ClockBar />
       </View>
       <View style={{ flex: 1 }}>{tab === 'chat' ? <Chat /> : <Dashboard />}</View>
       {!(kbd && tab === 'chat') && (
@@ -243,7 +266,12 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f5f5f0' },
   header: { backgroundColor: OLIVE, paddingVertical: 14, alignItems: 'center' },
   headerTxt: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  clock: { color: '#dfe6c8', fontSize: 12, marginTop: 2, fontVariant: ['tabular-nums'] },
+  clockBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 4, gap: 8 },
+  clock: { color: '#dfe6c8', fontSize: 12, fontVariant: ['tabular-nums'] },
+  warpBtn: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12, borderWidth: 1, borderColor: '#dfe6c8' },
+  warpOn: { backgroundColor: '#dfe6c8', borderColor: '#dfe6c8' },
+  warpTxt: { color: '#dfe6c8', fontSize: 11, fontWeight: '700' },
+  warpTxtOn: { color: OLIVE },
   chat: { flex: 1, paddingHorizontal: 12 },
   bubble: { maxWidth: '82%', padding: 10, borderRadius: 14, marginVertical: 4 },
   user: { alignSelf: 'flex-end', backgroundColor: OLIVE },

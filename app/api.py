@@ -43,11 +43,32 @@ class ChatIn(BaseModel):
 def clock_now() -> dict:
     """Heure courante du backend (virtuelle si le temps est accéléré) + facteur.
     Sert à afficher la date/heure qui défile en haut de l'app en mode test."""
+    factor = clock.get_factor()
     return {
         "now": now_local().replace(microsecond=0).isoformat(),
-        "factor": settings.time_factor,
-        "accelerated": settings.time_factor != 1.0,
+        "factor": factor,
+        "accelerated": factor != 1.0,
     }
+
+
+class ClockMode(BaseModel):
+    accelerated: bool
+
+
+@router.post("/clock/mode")
+def set_clock_mode(payload: ClockMode) -> dict:
+    """Bascule le temps entre accéléré et normal, à chaud (bouton dans l'app).
+    Ajuste aussi la cadence du scheduler pour ne pas rater les fenêtres de rappel."""
+    from .scheduler import set_tick_seconds
+    if payload.accelerated:
+        clock.set_factor(settings.accel_factor)
+        set_tick_seconds(settings.accel_tick_seconds)
+    else:
+        clock.set_factor(1.0)
+        set_tick_seconds(settings.tick_seconds)
+    factor = clock.get_factor()
+    return {"accelerated": factor != 1.0, "factor": factor,
+            "now": now_local().replace(microsecond=0).isoformat()}
 
 
 @router.post("/chat")

@@ -1,9 +1,9 @@
 """Horloge (éventuellement) accélérée pour tester le moteur proactif.
 
-En prod, ``time_factor == 1.0`` → temps réel strict.
-En test, ex. ``time_factor == 288.0`` → le temps virtuel avance 288x plus vite,
-donc 5 minutes réelles valent 1 journée. Tous les modules qui lisent l'heure
-passent par ``now_utc()`` : rappels, débriefs, inactivité, jalons, dates du jour.
+Facteur réglable À CHAUD (bouton dans l'app) : à chaque changement on RÉ-ANCRE sur
+l'instant virtuel courant pour que le temps ne "saute" pas — il change juste de
+vitesse. ``factor == 1.0`` → temps réel. ``288.0`` → 5 min réelles = 1 jour.
+Tous les modules qui lisent l'heure passent par ``now_utc()``.
 """
 
 import time
@@ -11,15 +11,25 @@ from datetime import datetime, timedelta, timezone
 
 from .config import settings
 
-# Ancrage au démarrage du process : à t0, virtuel == réel, puis on accélère.
-_START_MONO = time.monotonic()
-_START_REAL = datetime.now(timezone.utc)
+# Ancrage : virtuel(t) = _ANCHOR + (monotonic - _MONO0) * _FACTOR.
+_MONO0 = time.monotonic()
+_ANCHOR = datetime.now(timezone.utc)
+_FACTOR = settings.time_factor
 
 
 def now_utc() -> datetime:
-    """Heure UTC courante, accélérée si settings.time_factor > 1."""
-    factor = settings.time_factor
-    if factor == 1.0:
-        return datetime.now(timezone.utc)
-    elapsed = time.monotonic() - _START_MONO
-    return _START_REAL + timedelta(seconds=elapsed * factor)
+    """Heure UTC courante (accélérée si _FACTOR > 1)."""
+    elapsed = time.monotonic() - _MONO0
+    return _ANCHOR + timedelta(seconds=elapsed * _FACTOR)
+
+
+def set_factor(factor: float) -> None:
+    """Change la vitesse du temps sans discontinuité (ré-ancre sur maintenant)."""
+    global _MONO0, _ANCHOR, _FACTOR
+    _ANCHOR = now_utc()          # fige l'instant virtuel courant
+    _MONO0 = time.monotonic()
+    _FACTOR = float(factor)
+
+
+def get_factor() -> float:
+    return _FACTOR

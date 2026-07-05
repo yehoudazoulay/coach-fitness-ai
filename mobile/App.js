@@ -19,7 +19,17 @@ function Chat() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [kbHeight, setKbHeight] = useState(0);
   const scrollRef = useRef(null);
+
+  // On mesure la hauteur du clavier et on remonte la zone de saisie d'autant.
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const s = Keyboard.addListener(showEvt, (e) => setKbHeight(e.endCoordinates?.height ?? 0));
+    const h = Keyboard.addListener(hideEvt, () => setKbHeight(0));
+    return () => { s.remove(); h.remove(); };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -54,7 +64,7 @@ function Chat() {
   };
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, marginBottom: kbHeight }}>
       <ScrollView
         ref={scrollRef}
         style={styles.chat}
@@ -176,26 +186,21 @@ export default function App() {
   }, []);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <SafeAreaView style={{ flex: 1 }}>
-        <StatusBar style="light" />
-        <View style={styles.header}><Text style={styles.headerTxt}>🎖️ Le Sergent</Text></View>
-        <View style={{ flex: 1 }}>{tab === 'chat' ? <Chat /> : <Dashboard />}</View>
-        {!(kbd && tab === 'chat') && (
-          <View style={styles.tabs}>
-            <TouchableOpacity style={[styles.tab, tab === 'chat' && styles.tabActive]} onPress={() => setTab('chat')}>
-              <Text style={[styles.tabTxt, tab === 'chat' && styles.tabTxtActive]}>💬 Chat</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.tab, tab === 'dashboard' && styles.tabActive]} onPress={() => setTab('dashboard')}>
-              <Text style={[styles.tabTxt, tab === 'dashboard' && styles.tabTxtActive]}>📊 Suivi</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </SafeAreaView>
-    </KeyboardAvoidingView>
+    <SafeAreaView style={styles.root}>
+      <StatusBar style="light" />
+      <View style={styles.header}><Text style={styles.headerTxt}>🎖️ Le Sergent</Text></View>
+      <View style={{ flex: 1 }}>{tab === 'chat' ? <Chat /> : <Dashboard />}</View>
+      {!(kbd && tab === 'chat') && (
+        <View style={styles.tabs}>
+          <TouchableOpacity style={[styles.tab, tab === 'chat' && styles.tabActive]} onPress={() => setTab('chat')}>
+            <Text style={[styles.tabTxt, tab === 'chat' && styles.tabTxtActive]}>💬 Chat</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.tab, tab === 'dashboard' && styles.tabActive]} onPress={() => setTab('dashboard')}>
+            <Text style={[styles.tabTxt, tab === 'dashboard' && styles.tabTxtActive]}>📊 Suivi</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </SafeAreaView>
   );
 }
 

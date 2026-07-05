@@ -115,18 +115,20 @@ Le mécanisme de mémoire **épisodique** (≠ brique Santé, qui est le domaine
 
 Ce que l'utilisateur FAIT vraiment (≠ ce que le coach dit/sait). **Le cœur pour une
 audience qui abandonne** — et la source de presque toutes les relances.
-- 🔶 **Mesures** (`measurements`) : poids, tours, taux de gras… (base posée).
-- ⬜ **Adhérence** : séances faites vs prévues, régularité, suivi de la bouffe.
-- ⬜ **Progression visible** : montrer les résultats ("+2 cm de bras en 6 semaines",
-  courbe de poids, perfs qui montent) — ce qui donne envie de rester.
-- ⬜ **Photos** de progression.
-- Alimente : les débriefs de séance, les félicitations, les relances de recadrage.
+- ✅ **Adhérence** : table `workouts` (séances faites, ressenti, notes) + calcul
+  `sessions_this_week` vs objectif (`frequence`) + dernière séance. Injecté au coach.
+- ✅ **Capture conversationnelle** : "j'ai fait ma séance jambes" → loggé auto (via
+  `update_memory`, sans double-comptage).
+- 🔶 **Progression** : mesures (`measurements`) + tendance poids injectée. ⬜ perfs
+  détaillées (charges/reps par exo), ⬜ photos.
+- ⬜ Suivi de la bouffe (avec la brique Alimentation).
+- Alimente : débriefs de séance, félicitations, relances — et le futur moteur proactif.
 
 ### 7. Objectifs & jalons · 🔶
 
 - ✅ `goals` : objectifs + motivations (le "pourquoi", levier n°1).
-- ⬜ **Jalons / échéances** : la deadline (ex : mariage le 7 fév) → urgence et compte à
-  rebours dans les relances ("plus que 5 semaines, Soldat"). Moteur de motivation fort.
+- ✅ **Jalons / échéances** : table `milestones` (label + date), captés auto, compte à
+  rebours injecté au coach ("mariage dans N jours"). Moteur de motivation.
 - ⬜ Progression vers le jalon (où on en est vs l'objectif).
 
 ---

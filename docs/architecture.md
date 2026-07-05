@@ -141,12 +141,14 @@ décider : **quand** relancer, et **quoi** dire. Socle : `scheduler.py` (tick /5
 
 Triggers :
 - ✅ **Rappel avant séance** (+ quoi faire) & **débrief après** ("alors ? c'est quand la
-  prochaine ?"). Boucle auto-entretenue : le coach demande la prochaine séance → capture →
-  rappelle → débriefe → redemande.
-- ⬜ Events : prise de news ("ça va mieux le genou ?") · relance si malade depuis X jours
-- ⬜ Suivi/adhérence : relance si inactif ("0 séance depuis 5 jours")
-- ⬜ Jalons : compte à rebours proactif ("plus que N semaines avant le mariage")
+  prochaine ?"). Boucle auto-entretenue.
+- ✅ **Events** : prise de news sur santé/blessure/moral non résolu ("ça va mieux le genou ?").
+- ✅ **Suivi/adhérence** : relance si inactif ("zéro séance, c'est quand la prochaine ?").
+- ✅ **Jalons** : compte à rebours quand le jalon est proche (≤ 90 j).
 - ⬜ Alimentation : "t'as pensé à ta prise de protéines ?" (plus tard)
+
+Anti-spam : `proactive_log` + cooldowns (news 72h, inactivité 48h, jalon 7j) ; 1 relance
+conditionnelle max par utilisateur par tick, par priorité (news > inactivité > jalon).
 
 ⚠️ **Contraintes réelles** : (1) WhatsApp — envoi proactif hors fenêtre 24h = templates Meta
 (prod, pas sandbox) ; un envoi refusé n'est pas marqué envoyé → retenté. (2) Render free —

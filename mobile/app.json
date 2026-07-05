@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Coach Fitness",
+    "slug": "coach-fitness-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": { "supportsTablet": true },
+    "android": {},
+    "web": {}
+  }
+}

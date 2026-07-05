@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # Proactif
     timezone: str = "Europe/Brussels"  # fuseau des utilisateurs (rappels à l'heure locale)
     proactive_enabled: bool = True  # moteur de relances (rappels/débriefs) actif
+    tick_seconds: int = 300  # cadence du scheduler (300 = 5 min ; baisser en test)
+
+    # MODE TEST — accélération du temps. 1.0 = temps réel.
+    # 288.0 = 5 min réelles valent 1 jour (1440 min / 5). Mets aussi tick_seconds bas.
+    time_factor: float = 1.0
 
 
 settings = Settings()

@@ -11,12 +11,13 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from .config import settings
+from . import clock
 
 
 def now_local() -> datetime:
     """Heure actuelle dans le fuseau des utilisateurs (naïve, pour comparer aux
-    heures locales stockées)."""
-    return datetime.now(ZoneInfo(settings.timezone)).replace(tzinfo=None)
+    heures locales stockées). Passe par l'horloge (accélérable en test)."""
+    return clock.now_utc().astimezone(ZoneInfo(settings.timezone)).replace(tzinfo=None)
 
 
 def fmt_local(dt: datetime) -> str:
@@ -213,7 +214,7 @@ def init_db() -> None:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return clock.now_utc().isoformat()
 
 
 def get_or_create_user(wa_id: str) -> sqlite3.Row:
@@ -330,7 +331,7 @@ def measurement_history(user_id: int, metric: str) -> list[sqlite3.Row]:
 # --- Suivi / adhérence : journal des séances ---------------------------------
 
 def _week_start_iso() -> str:
-    now = datetime.now(timezone.utc)
+    now = clock.now_utc()
     monday = (now - timedelta(days=now.weekday())).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -404,7 +405,7 @@ def get_milestones(user_id: int) -> list[sqlite3.Row]:
 
 def upcoming_milestones(user_id: int) -> list[sqlite3.Row]:
     """Jalons à venir (date cible >= aujourd'hui), triés par date."""
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = clock.now_utc().date().isoformat()
     with get_conn() as conn:
         return conn.execute(
             "SELECT label, target_date FROM milestones WHERE user_id = ? "
@@ -494,7 +495,7 @@ def mark_debrief_sent(planned_id: int) -> None:
 
 def recently_sent(user_id: int, kind: str, ref: str, cooldown_hours: int) -> bool:
     """A-t-on déjà envoyé ce type de relance (même ref) dans la fenêtre de cooldown ?"""
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=cooldown_hours)).isoformat()
+    cutoff = (clock.now_utc() - timedelta(hours=cooldown_hours)).isoformat()
     with get_conn() as conn:
         return conn.execute(
             "SELECT 1 FROM proactive_log WHERE user_id = ? AND kind = ? AND ref = ? "

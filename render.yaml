@@ -21,3 +21,10 @@ services:
         value: whatsapp:+14155238886
       - key: DATABASE_PATH
         value: coach.db
+      # --- MODE TEST : temps accéléré pour voir le proactif sans attendre des jours.
+      # TIME_FACTOR=288 -> 5 min réelles = 1 jour. TICK_SECONDS=8 -> le scheduler
+      # scanne souvent (indispensable en temps accéléré). ⚠️ REMETTRE 1.0 / 300 en prod.
+      - key: TIME_FACTOR
+        value: "288"
+      - key: TICK_SECONDS
+        value: "8"

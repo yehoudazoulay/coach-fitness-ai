@@ -14,6 +14,7 @@ from datetime import date, datetime, timezone
 
 from openai import OpenAI
 
+from . import clock
 from .coaches import COMMON_RULES, coach_persona, discovery_instructions
 from .config import settings
 from .db import (
@@ -54,7 +55,7 @@ _MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "aoû
 
 
 def _today_str() -> str:
-    now = datetime.now()
+    now = now_local()
     return (f"{_JOURS[now.weekday()]} {now.day} {_MOIS[now.month - 1]} "
             f"{now.year}, {now:%H:%M}")
 
@@ -133,7 +134,7 @@ def _dynamic_context(user: sqlite3.Row) -> str:
     lw = last_workout(user["id"])
     if lw is not None:
         try:
-            days = (datetime.now(timezone.utc)
+            days = (clock.now_utc()
                     - datetime.fromisoformat(lw["performed_at"])).days
             desc = f" ({lw['session_name']})" if lw["session_name"] else ""
             suivi.append(f"Dernière séance{desc} : il y a {days} jour(s).")
@@ -157,7 +158,7 @@ def _dynamic_context(user: sqlite3.Row) -> str:
     # Jalons à venir (compte à rebours).
     ms = upcoming_milestones(user["id"])
     if ms:
-        today = datetime.now(timezone.utc).date()
+        today = clock.now_utc().date()
         lines = []
         for m in ms:
             try:

@@ -17,6 +17,7 @@ from datetime import date, datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from . import clock
 from .config import settings
 from .db import (
     active_events,
@@ -31,6 +32,7 @@ from .db import (
     mark_reminder_sent,
     now_local,
     recently_sent,
+    save_message,
     upcoming_milestones,
 )
 from .whatsapp import send_whatsapp
@@ -48,9 +50,19 @@ def _days_since(iso: str) -> int:
         dt = datetime.fromisoformat(iso)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return (datetime.now(timezone.utc) - dt).days
+        return (clock.now_utc() - dt).days
     except Exception:  # noqa: BLE001
         return 0
+
+
+def _deliver(user, msg: str) -> bool:
+    """Livre un message proactif : (1) on l'ENREGISTRE en base comme message du
+    coach — c'est ce qui le fait apparaître dans l'app (via son poll) ; (2) on
+    l'envoie sur WhatsApp seulement si l'utilisateur est un contact WhatsApp."""
+    save_message(user["id"], "assistant", msg)
+    if str(user["wa_id"]).startswith("whatsapp:"):
+        return send_whatsapp(user["wa_id"], msg)
+    return True  # utilisateur app : le message est en base, le poll le récupérera
 
 
 def _send_nudge(user, kind: str, ref: str = "", detail: str | None = None) -> None:
@@ -59,7 +71,7 @@ def _send_nudge(user, kind: str, ref: str = "", detail: str | None = None) -> No
     from .coach import generate_proactive
     try:
         msg = generate_proactive(user, kind, detail)
-        sent = send_whatsapp(user["wa_id"], msg)
+        sent = _deliver(user, msg)
         log_proactive(user["id"], kind, ref)
         log.info("Relance '%s' %s pour %s", kind,
                  "envoyée" if sent else "générée (envoi refusé)", user["wa_id"])
@@ -108,7 +120,7 @@ def tick() -> None:
         try:
             from .coach import generate_proactive
             user = get_or_create_user(r["wa_id"])
-            if send_whatsapp(r["wa_id"], generate_proactive(user, "reminder")):
+            if _deliver(user, generate_proactive(user, "reminder")):
                 mark_reminder_sent(r["id"])
                 log.info("Rappel envoyé à %s (séance %s)", r["wa_id"], r["scheduled_at"])
         except Exception:  # noqa: BLE001
@@ -118,7 +130,7 @@ def tick() -> None:
         try:
             from .coach import generate_proactive
             user = get_or_create_user(r["wa_id"])
-            if send_whatsapp(r["wa_id"], generate_proactive(user, "debrief")):
+            if _deliver(user, generate_proactive(user, "debrief")):
                 mark_debrief_sent(r["id"])
                 log.info("Débrief envoyé à %s (séance %s)", r["wa_id"], r["scheduled_at"])
         except Exception:  # noqa: BLE001
@@ -135,7 +147,10 @@ def tick() -> None:
 def start() -> None:
     scheduler.start()
     if settings.proactive_enabled:
-        scheduler.add_job(tick, "interval", minutes=5, id="proactive_tick")
-        log.info("Moteur proactif ACTIF (tick toutes les 5 min).")
+        secs = max(5, settings.tick_seconds)
+        scheduler.add_job(tick, "interval", seconds=secs, id="proactive_tick")
+        extra = f" — temps ACCÉLÉRÉ x{settings.time_factor:g}" \
+            if settings.time_factor != 1.0 else ""
+        log.info("Moteur proactif ACTIF (tick toutes les %ss)%s.", secs, extra)
     else:
         log.info("Moteur proactif désactivé (proactive_enabled=false).")

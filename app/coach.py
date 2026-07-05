@@ -10,7 +10,7 @@ NB : OpenAI applique un prompt caching AUTOMATIQUE (> ~1024 tokens), rien à cod
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime, timezone
 
 from openai import OpenAI
 
@@ -23,14 +23,21 @@ from .db import (
     add_fact,
     add_goal,
     add_measurement,
+    add_milestone,
     current_program,
     get_facts,
     get_goals,
+    get_milestones,
+    last_workout,
     latest_measurements,
+    log_workout,
+    measurement_history,
     save_new_program,
+    sessions_this_week,
     update_event,
     update_fact,
     update_goal,
+    upcoming_milestones,
 )
 from .programs_lib import program_instructions
 
@@ -104,6 +111,57 @@ def _dynamic_context(user: sqlite3.Row) -> str:
     prog = current_program(user["id"])
     if prog is not None:
         parts.append(f"SON PROGRAMME ACTUEL (v{prog['version']}) : {prog['content']}")
+
+    # Suivi / adhérence : séances de la semaine vs objectif + dernière séance.
+    suivi = []
+    n = sessions_this_week(user["id"])
+    freq = None
+    if prog is not None:
+        try:
+            freq = json.loads(prog["content"]).get("frequence")
+        except Exception:  # noqa: BLE001
+            freq = None
+    if n or freq:
+        s = f"Séances faites cette semaine : {n}"
+        if freq:
+            s += f" (objectif : {freq}/semaine)"
+        suivi.append(s + ".")
+    lw = last_workout(user["id"])
+    if lw is not None:
+        try:
+            days = (datetime.now(timezone.utc)
+                    - datetime.fromisoformat(lw["performed_at"])).days
+            desc = f" ({lw['session_name']})" if lw["session_name"] else ""
+            suivi.append(f"Dernière séance{desc} : il y a {days} jour(s).")
+        except Exception:  # noqa: BLE001
+            pass
+    if suivi:
+        parts.append("SUIVI / ASSIDUITÉ (débriefe, félicite ou secoue selon) :\n"
+                     + "\n".join("- " + x for x in suivi))
+
+    # Jalons à venir (compte à rebours).
+    ms = upcoming_milestones(user["id"])
+    if ms:
+        today = datetime.now(timezone.utc).date()
+        lines = []
+        for m in ms:
+            try:
+                days = (date.fromisoformat(m["target_date"]) - today).days
+                lines.append(f"{m['label']} : dans {days} jour(s) ({m['target_date']})")
+            except Exception:  # noqa: BLE001
+                lines.append(f"{m['label']} ({m['target_date']})")
+        parts.append("JALON(S) À VENIR (fais le compte à rebours quand c'est "
+                     "pertinent) :\n" + "\n".join("- " + x for x in lines))
+
+    # Progression poids (si ≥ 2 mesures).
+    hist = measurement_history(user["id"], "poids")
+    if len(hist) >= 2:
+        f0, fn = hist[0], hist[-1]
+        parts.append(
+            f"PROGRESSION POIDS : {f0['value']}{f0['unit'] or ''} "
+            f"({f0['measured_at'][:10]}) -> {fn['value']}{fn['unit'] or ''} "
+            f"({fn['measured_at'][:10]})."
+        )
 
     return "\n".join(parts)
 
@@ -186,8 +244,16 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
     )
     if not last_user:
         return []
-    # Contexte pour résoudre les références (ex: "82" juste après "ton poids ?").
-    tail = "\n".join(f'{m["role"]}: {m["content"]}' for m in history[-4:])
+    # On sépare CONTEXTE (à ne pas extraire, juste pour les références) et le
+    # MESSAGE à traiter -> évite de re-logguer une séance/mesure déjà vue au tour d'avant.
+    ctx_msgs = history[:-1][-4:] if history and history[-1]["content"] == last_user \
+        else history[-4:]
+    ctx = "\n".join(f'{m["role"]}: {m["content"]}' for m in ctx_msgs) or "(aucun)"
+    user_content = (
+        "CONTEXTE (pour comprendre les références — n'extrais RIEN d'ici) :\n" + ctx
+        + "\n\nMESSAGE À TRAITER (extrais UNIQUEMENT ce que CE message apporte) :\n"
+        + last_user
+    )
 
     ev = active_events(user_id, 20)
     known_ev = "\n".join(
@@ -203,10 +269,15 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
     known_go = "\n".join(
         f'- goal_id={g["id"]} [{g["type"]}] {g["content"]}' for g in gs
     ) or "(aucun)"
+    mi = get_milestones(user_id)
+    known_mi = "\n".join(
+        f'- {m["label"]} ({m["target_date"]})' for m in mi
+    ) or "(aucun)"
+    today = datetime.now(timezone.utc).date().isoformat()
 
     system = (
         "Tu tiens à jour la mémoire d'un coach sur son client, depuis son DERNIER "
-        "message. Tu ROUTES l'info entre trois catégories :\n\n"
+        f"message. Date du jour : {today}. Tu ROUTES l'info entre ces catégories :\n\n"
         "GOALS = ce qu'il VEUT atteindre (type 'objectif') et POURQUOI, son "
         "déclencheur profond (type 'motivation'). C'est le cœur du coaching.\n"
         "EVENTS = épisodique, ça arrive puis ça passe, statut qui évolue (malade, "
@@ -215,13 +286,20 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
         "mercredi, amis le jeudi soir, sommeil, alimentation en gros, contraintes).\n"
         "MESURES = données chiffrées du corps qu'il RAPPORTE (poids, taille, taux "
         "de gras, tour de bras/taille/cuisse...). metric + valeur + unité.\n"
-        "Règles : ce qu'il veut / son pourquoi -> goal ; début/fin/statut -> event ; "
-        "permanent/récurrent -> fact ; chiffre du corps -> mesure.\n\n"
+        "WORKOUTS = une SÉANCE qu'il dit avoir FAITE (pas prévue) : session_name (ce "
+        "qu'il a fait), feeling (ressenti), notes.\n"
+        "MILESTONES = une échéance DATÉE importante (mariage, compétition, deadline "
+        "d'objectif). label + target_date au format AAAA-MM-JJ (résous les dates "
+        "relatives/ambiguës avec la date du jour).\n"
+        "Règles : ce qu'il veut/pourquoi -> goal ; début/fin/statut -> event ; "
+        "permanent/récurrent -> fact ; chiffre du corps -> mesure ; séance faite -> "
+        "workout ; échéance datée -> milestone.\n\n"
         "Pour chaque catégorie tu peux CRÉER ou METTRE À JOUR l'existant (ne "
         "duplique pas : si ça évolue, mets à jour via l'id). IGNORE le trivial.\n\n"
         "Objectifs/motivations connus :\n" + known_go + "\n\n"
         "Events actifs connus :\n" + known_ev + "\n\n"
         "Faits connus :\n" + known_fa + "\n\n"
+        "Jalons connus :\n" + known_mi + "\n\n"
         "Réponds UNIQUEMENT en JSON :\n"
         '{"new_goals": [{"type": "objectif|motivation", "content": "phrase", '
         '"priority": 1}],\n'
@@ -234,7 +312,9 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
         'sante_fond", "content": "phrase"}],\n'
         ' "fact_updates": [{"fact_id": <int>, "content": "phrase mise à jour"}],\n'
         ' "new_measurements": [{"metric": "poids|taille|taux_gras|tour_bras|'
-        'tour_taille|...", "value": <nombre>, "unit": "kg|cm|%"}]}\n'
+        'tour_taille|...", "value": <nombre>, "unit": "kg|cm|%"}],\n'
+        ' "new_workouts": [{"session_name": "...", "feeling": "...", "notes": "..."}],\n'
+        ' "new_milestones": [{"label": "...", "target_date": "AAAA-MM-JJ"}]}\n'
         "Listes vides si rien. Le texte fourni contient les derniers échanges pour "
         "le CONTEXTE ; n'extrais que ce qu'apporte le TOUT DERNIER message de "
         "l'utilisateur."
@@ -246,7 +326,7 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": tail},
+                {"role": "user", "content": user_content},
             ],
         )
         data = json.loads(response.choices[0].message.content or "{}")
@@ -290,6 +370,15 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
         if metric and isinstance(value, (int, float)):
             add_measurement(user_id, metric, float(value), m.get("unit"))
             changes.append({"action": "mesure+", "metric": metric, "value": value})
+    for w in data.get("new_workouts", []):
+        log_workout(user_id, session_name=w.get("session_name"),
+                    feeling=w.get("feeling"), notes=w.get("notes"))
+        changes.append({"action": "workout+", "session": w.get("session_name")})
+    for m in data.get("new_milestones", []):
+        label, td = (m.get("label") or "").strip(), (m.get("target_date") or "").strip()
+        if label and td:
+            add_milestone(user_id, label, td)
+            changes.append({"action": "milestone+", "label": label, "date": td})
     return changes
 
 

@@ -7,7 +7,7 @@ toucher au reste du code (seules ces fonctions changent).
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .config import settings
 
@@ -102,6 +102,26 @@ def init_db() -> None:
                 updated_at  TEXT NOT NULL
             );
 
+            -- SUIVI / ADHÉRENCE : journal des séances RÉELLEMENT faites.
+            CREATE TABLE IF NOT EXISTS workouts (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      INTEGER NOT NULL REFERENCES users(id),
+                performed_at TEXT NOT NULL,   -- quand la séance a été faite
+                session_name TEXT,            -- ce qu'il a fait ("jambes", "full body"...)
+                feeling      TEXT,            -- ressenti ("bien", "dur", "cramé"...)
+                notes        TEXT,            -- note libre
+                created_at   TEXT NOT NULL
+            );
+
+            -- JALONS : échéances datées importantes (mariage, compétition...).
+            CREATE TABLE IF NOT EXISTS milestones (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL REFERENCES users(id),
+                label       TEXT NOT NULL,    -- "mariage", "compétition"...
+                target_date TEXT NOT NULL,    -- 'YYYY-MM-DD'
+                created_at  TEXT NOT NULL
+            );
+
             -- MESURES du corps (série temporelle) : générique et extensible.
             -- metric = 'poids','taille','taux_gras','tour_bras','tour_taille'... -> on
             -- ajoute n'importe quelle mesure sans changer le schéma.
@@ -132,6 +152,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_facts_user    ON facts(user_id);
             CREATE INDEX IF NOT EXISTS idx_goals_user    ON goals(user_id, is_active);
             CREATE INDEX IF NOT EXISTS idx_meas_user     ON measurements(user_id, metric);
+            CREATE INDEX IF NOT EXISTS idx_workouts_user ON workouts(user_id, performed_at);
+            CREATE INDEX IF NOT EXISTS idx_miles_user    ON milestones(user_id, target_date);
             """
         )
         # Migration douce : ajoute coach_id aux bases déjà créées avant cette colonne.
@@ -267,6 +289,92 @@ def measurement_history(user_id: int, metric: str) -> list[sqlite3.Row]:
             "SELECT value, unit, measured_at FROM measurements "
             "WHERE user_id = ? AND metric = ? ORDER BY id",
             (user_id, metric),
+        ).fetchall()
+
+
+# --- Suivi / adhérence : journal des séances ---------------------------------
+
+def _week_start_iso() -> str:
+    now = datetime.now(timezone.utc)
+    monday = (now - timedelta(days=now.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return monday.isoformat()
+
+
+def log_workout(
+    user_id: int, session_name: str | None = None, feeling: str | None = None,
+    notes: str | None = None, performed_at: str | None = None,
+) -> int:
+    now = _now()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO workouts (user_id, performed_at, session_name, feeling, "
+            "notes, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, performed_at or now, session_name, feeling, notes, now),
+        )
+        return cur.lastrowid
+
+
+def sessions_this_week(user_id: int) -> int:
+    """Nombre de séances faites depuis lundi (semaine en cours)."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) AS c FROM workouts WHERE user_id = ? AND performed_at >= ?",
+            (user_id, _week_start_iso()),
+        ).fetchone()["c"]
+
+
+def last_workout(user_id: int) -> sqlite3.Row | None:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT performed_at, session_name, feeling, notes FROM workouts "
+            "WHERE user_id = ? ORDER BY performed_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+
+
+# --- Jalons / échéances ------------------------------------------------------
+
+def add_milestone(user_id: int, label: str, target_date: str) -> int:
+    """Upsert par label (met à jour la date si le jalon existe déjà)."""
+    now = _now()
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT id FROM milestones WHERE user_id = ? AND lower(label) = lower(?)",
+            (user_id, label),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE milestones SET target_date = ? WHERE id = ?",
+                (target_date, existing["id"]),
+            )
+            return existing["id"]
+        cur = conn.execute(
+            "INSERT INTO milestones (user_id, label, target_date, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, label, target_date, now),
+        )
+        return cur.lastrowid
+
+
+def get_milestones(user_id: int) -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT id, label, target_date FROM milestones WHERE user_id = ? "
+            "ORDER BY target_date",
+            (user_id,),
+        ).fetchall()
+
+
+def upcoming_milestones(user_id: int) -> list[sqlite3.Row]:
+    """Jalons à venir (date cible >= aujourd'hui), triés par date."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT label, target_date FROM milestones WHERE user_id = ? "
+            "AND target_date >= ? ORDER BY target_date",
+            (user_id, today),
         ).fetchall()
 
 

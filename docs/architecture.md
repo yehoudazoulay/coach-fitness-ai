@@ -133,17 +133,25 @@ audience qui abandonne** — et la source de presque toutes les relances.
 
 ---
 
-## Le moteur transversal de relances / triggers · ⬜
+## Le moteur transversal de relances / triggers · 🔶
 
 **Une seule logique**, pas dupliquée par brique. Il pioche dans toutes les briques pour
-décider : **quand** relancer, et **quoi** dire.
+décider : **quand** relancer, et **quoi** dire. Socle : `scheduler.py` (tick /5 min) +
+`generate_proactive()` (message dans la voix du coach) + `planned_sessions`.
 
-Exemples de triggers (par brique) :
-- Programme : rappel avant séance (+ quoi faire) · débrief après ("alors ?")
-- Events : prise de news ("ça va mieux le genou ?") · relance si malade depuis X jours
-- Suivi/adhérence : "t'as fait combien de séances cette semaine ?" · relance si inactif
-- Jalons : compte à rebours ("plus que N semaines avant le mariage")
-- Alimentation : "t'as pensé à ta prise de protéines ?" (plus tard)
+Triggers :
+- ✅ **Rappel avant séance** (+ quoi faire) & **débrief après** ("alors ? c'est quand la
+  prochaine ?"). Boucle auto-entretenue : le coach demande la prochaine séance → capture →
+  rappelle → débriefe → redemande.
+- ⬜ Events : prise de news ("ça va mieux le genou ?") · relance si malade depuis X jours
+- ⬜ Suivi/adhérence : relance si inactif ("0 séance depuis 5 jours")
+- ⬜ Jalons : compte à rebours proactif ("plus que N semaines avant le mariage")
+- ⬜ Alimentation : "t'as pensé à ta prise de protéines ?" (plus tard)
+
+⚠️ **Contraintes réelles** : (1) WhatsApp — envoi proactif hors fenêtre 24h = templates Meta
+(prod, pas sandbox) ; un envoi refusé n'est pas marqué envoyé → retenté. (2) Render free —
+le service **s'endort** après 15 min → le scheduler ne tourne QUE quand le service est
+éveillé. Pour du proactif fiable : always-on (payant) ou keep-alive.
 
 ⚠️ **Contrainte WhatsApp** : écrire en premier hors fenêtre 24h nécessite des **templates
 Meta** (compte Business, pas le sandbox). En sandbox : marche seulement si l'utilisateur

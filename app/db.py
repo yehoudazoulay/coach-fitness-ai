@@ -447,11 +447,14 @@ def next_planned_session(user_id: int) -> sqlite3.Row | None:
         ).fetchone()
 
 
-def due_reminders(now_iso: str, window_min: int = 45) -> list[sqlite3.Row]:
-    """Séances qui commencent bientôt (dans la fenêtre) et pas encore rappelées.
+def due_reminders(now_iso: str, before_min: int = 30, late_min: int = 30) -> list[sqlite3.Row]:
+    """Séances à rappeler : on vise ~30 min AVANT la séance (before_min). late_min est
+    une marge de rattrapage arrière (tick manqué / temps accéléré) pour ne pas perdre
+    le rappel — en usage normal le tick de 5 min tombe toujours dans la fenêtre avant.
     Renvoie aussi le wa_id pour l'envoi."""
-    horizon = fmt_local(datetime.fromisoformat(now_iso) + timedelta(minutes=window_min))
-    grace = fmt_local(datetime.fromisoformat(now_iso) - timedelta(minutes=10))
+    now = datetime.fromisoformat(now_iso)
+    horizon = fmt_local(now + timedelta(minutes=before_min))
+    grace = fmt_local(now - timedelta(minutes=late_min))
     with get_conn() as conn:
         return conn.execute(
             "SELECT p.id, p.user_id, p.scheduled_at, p.session_name, u.wa_id "

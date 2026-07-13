@@ -152,8 +152,14 @@ def _dynamic_context(user: sqlite3.Row) -> str:
             quoi = f" ({nps['session_name']})" if nps["session_name"] else ""
             parts.append(f"PROCHAINE SÉANCE PRÉVUE : {quand}{quoi}.")
         else:
-            parts.append("PAS DE PROCHAINE SÉANCE PRÉVUE : demande-lui, de toi-même, "
-                         "c'est quand sa prochaine séance, pour pouvoir la lui rappeler.")
+            parts.append(
+                "PAS DE PROCHAINE SÉANCE PRÉVUE : demande-lui, de toi-même, c'est quand "
+                "sa prochaine séance. S'il donne un moment VAGUE ('ce soir', 'jeudi', "
+                "'demain'), tu ne l'embêtes pas : tu PARS SUR UNE HEURE PAR DÉFAUT "
+                "raisonnable (soir=18h, matin=8h, midi=12h, après-midi=14h) et tu "
+                "l'ANNONCES pour qu'il corrige si besoin ('Ok ce soir — je te cale à 18h, "
+                "tu me dis si c'est un autre créneau.'). Une heure approx suffit : c'est "
+                "elle qui cale ton rappel (30 min avant). Ne mets 21h que s'il le dit.")
 
     # Jalons à venir (compte à rebours).
     ms = upcoming_milestones(user["id"])
@@ -219,10 +225,11 @@ def generate_reply(user: sqlite3.Row, history: list[dict]) -> str:
 
 _PROACTIVE_INSTR = {
     "reminder": (
-        "TU ÉCRIS EN PREMIER — RAPPEL DE SÉANCE. La personne ne t'a rien demandé, "
-        "c'est toi qui l'interpelles : sa prochaine séance approche. Rappelle-lui d'y "
-        "aller, cash et motivant, dans TA voix, et rappelle brièvement ce qu'elle est "
-        "censée faire (cf. son programme). Court et qui claque."
+        "TU ÉCRIS EN PREMIER — RAPPEL DE SÉANCE, ~30 MIN AVANT. La personne ne t'a rien "
+        "demandé : sa séance est dans une demi-heure environ. Préviens-la que ça approche "
+        "(genre 'dans 30 min') pour qu'elle se prépare, cash et motivant, dans TA voix, "
+        "et rappelle brièvement ce qu'elle est censée faire (cf. son programme). Court et "
+        "qui claque."
     ),
     "debrief": (
         "TU ÉCRIS EN PREMIER — DÉBRIEF POST-SÉANCE. Sa séance vient de passer : "
@@ -359,8 +366,13 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
         "d'objectif). label + target_date au format AAAA-MM-JJ (résous les dates "
         "relatives/ambiguës avec la date du jour).\n"
         "NEXT_SESSION = la PROCHAINE séance qu'il PRÉVOIT de faire (future, pas encore "
-        "faite) : scheduled_at à l'heure locale AAAA-MM-JJTHH:MM (résous 'demain 18h', "
-        "'ce soir', 'jeudi', 'dans 2h' avec l'heure actuelle) + session_name (optionnel).\n"
+        "faite) : scheduled_at à l'heure locale AAAA-MM-JJTHH:MM + session_name (optionnel). "
+        "Si une heure est donnée, utilise-la. Sinon DEVINE avec des HEURES PAR DÉFAUT "
+        "raisonnables : matin->08:00, midi->12:00, après-midi->14:00, soir->18:00 (ex : "
+        "'ce soir'->18:00, 'demain matin'->le lendemain 08:00). Un JOUR sans moment "
+        "précisé ('jeudi', 'demain') -> 18:00 par défaut. Ne mets 21:00 QUE s'il le dit "
+        "explicitement. next_session = null seulement si AUCUN jour ni moment n'est "
+        "annoncé. (Le coach annoncera l'heure retenue pour qu'il puisse corriger.)\n"
         "Règles : ce qu'il veut/pourquoi -> goal ; début/fin/statut -> event ; "
         "permanent/récurrent -> fact ; chiffre du corps -> mesure ; séance FAITE -> "
         "workout ; séance PRÉVUE -> next_session ; échéance datée -> milestone.\n\n"

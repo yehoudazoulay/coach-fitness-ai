@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     proactive_enabled: bool = True  # moteur de relances (rappels/débriefs) actif
     tick_seconds: int = 300  # cadence du scheduler en mode normal (300 = 5 min)
 
+    # Heures calmes : aucun message proactif (débrief, relances) entre quiet_start et
+    # quiet_end, heure LOCALE. Évite les "c'était comment ta séance ?" à 1h du mat.
+    # (Les rappels de séance, eux, suivent l'heure choisie par l'utilisateur.)
+    quiet_start: int = 22  # 22h
+    quiet_end: int = 8     # 8h
+
     # MODE TEST — accélération du temps, pilotable À CHAUD depuis l'app.
     # time_factor = vitesse AU DÉMARRAGE (1.0 = temps réel).
     # Quand on active l'accéléré (bouton app) : facteur -> accel_factor, cadence

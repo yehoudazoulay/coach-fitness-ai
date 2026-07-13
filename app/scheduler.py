@@ -55,6 +55,13 @@ def _days_since(iso: str) -> int:
         return 0
 
 
+def _is_quiet() -> bool:
+    """Vrai si on est dans la plage calme locale (aucun proactif système la nuit)."""
+    h = now_local().hour
+    s, e = settings.quiet_start, settings.quiet_end
+    return (s <= h < e) if s <= e else (h >= s or h < e)  # gère le passage à minuit
+
+
 def _deliver(user, msg: str) -> bool:
     """Livre un message proactif : (1) on l'ENREGISTRE en base comme message du
     coach — c'est ce qui le fait apparaître dans l'app (via son poll) ; (2) on
@@ -132,6 +139,12 @@ def tick() -> None:
                 log.info("Rappel envoyé à %s (séance %s)", r["wa_id"], r["scheduled_at"])
         except Exception:  # noqa: BLE001
             log.exception("Erreur rappel pour %s", r["wa_id"])
+
+    # Débriefs + relances conditionnelles : SEULEMENT en heures raisonnables. Un
+    # débrief dû en pleine nuit est simplement reporté (il repassera dû au réveil,
+    # tant qu'on est dans la fenêtre 24h) -> plus de "c'était comment ?" à 1h du mat.
+    if _is_quiet():
+        return
 
     for r in due_debriefs(now_iso):
         try:

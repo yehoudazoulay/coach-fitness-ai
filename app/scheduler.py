@@ -34,6 +34,7 @@ from .db import (
     recently_sent,
     save_message,
     upcoming_milestones,
+    workouts_done_count,
 )
 from .whatsapp import send_whatsapp
 
@@ -106,13 +107,19 @@ def _condition_nudge(user) -> None:
                 _send_nudge(user, "event_news", str(e["event_key"]), e["content"])
                 return
 
-    # 2. Inactivité : dernière séance il y a >= 4 jours.
+    # 2. Point charges : tous les 10 séances faites, on fait le point sur les charges.
+    n = workouts_done_count(uid)
+    if n > 0 and n % 10 == 0 and not recently_sent(uid, "loads", str(n), 24 * 14):
+        _send_nudge(user, "loads", str(n))
+        return
+
+    # 3. Inactivité : dernière séance il y a >= 4 jours.
     if _days_since(lw["performed_at"]) >= 4 \
             and not recently_sent(uid, "inactivity", "", 48):
         _send_nudge(user, "inactivity")
         return
 
-    # 3. Compte à rebours d'un jalon proche (<= 90 jours), 1x/semaine.
+    # 4. Compte à rebours d'un jalon proche (<= 90 jours), 1x/semaine.
     ms = upcoming_milestones(uid)
     if ms:
         m = ms[0]

@@ -116,6 +116,25 @@ def _dynamic_context(user: sqlite3.Row) -> str:
     prog = current_program(user["id"])
     if prog is not None:
         parts.append(f"SON PROGRAMME ACTUEL (v{prog['version']}) : {prog['content']}")
+        # Charges par exo : repère les exos du programme SANS charge enregistrée,
+        # pour que le Sergent aille les chercher (débrief / point charges).
+        try:
+            known = {m["metric"].strip().lower() for m in ms}
+            exos = []
+            for s in json.loads(prog["content"]).get("seances", []):
+                for e in s.get("exos", []):
+                    nom = (e.get("exo") or "").strip()
+                    if nom and nom.lower() not in known and nom not in exos:
+                        exos.append(nom)
+            if exos:
+                parts.append(
+                    "CHARGES À COLLECTER (exos du programme sans charge enregistrée) : "
+                    + ", ".join(exos[:12]) + ". Quand c'est naturel (surtout au débrief, "
+                    "ou s'il fait un exo pour la 1re fois), demande combien il soulève "
+                    "dessus (kg) ET l'intensité ressentie, pour démarrer leur historique. "
+                    "Une fois la charge connue, tu la suis et tu la challenges.")
+        except Exception:  # noqa: BLE001
+            pass
 
     # Suivi / adhérence : séances de la semaine vs objectif + dernière séance.
     suivi = []
@@ -235,7 +254,16 @@ _PROACTIVE_INSTR = {
         "TU ÉCRIS EN PREMIER — DÉBRIEF POST-SÉANCE. Sa séance vient de passer : "
         "demande, dans TA voix, si elle l'a FAITE ou pas et comment ça s'est passé — et "
         "réclame l'INTENSITÉ ressentie sur 10 ('tu la mets à combien sur 10, cette "
-        "séance ?'). Puis ENCHAÎNE en lui demandant c'est quand sa PROCHAINE séance. Court."
+        "séance ?'). Si des exos du programme n'ont pas encore de charge enregistrée "
+        "(cf. CHARGES À COLLECTER dans le contexte), profites-en pour demander combien "
+        "il a mis dessus. Puis ENCHAÎNE en lui demandant c'est quand sa PROCHAINE séance. "
+        "Court."
+    ),
+    "loads": (
+        "TU ÉCRIS EN PREMIER — POINT CHARGES. Ça fait un paquet de séances : c'est "
+        "l'heure de faire le point sur les charges. Demande-lui, dans TA voix, où il en "
+        "est sur ses exos principaux (combien il met maintenant) pour vérifier qu'il "
+        "PROGRESSE et ajuster. S'il stagne, tu le pousses à charger. Court et concret."
     ),
     "inactivity": (
         "TU ÉCRIS EN PREMIER — RELANCE D'ASSIDUITÉ. Ça fait un moment qu'il n'a pas "
@@ -359,8 +387,11 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
         "blessure, vacances la semaine prochaine, coup dur, victoire, stress ponctuel).\n"
         "FACTS = stable/récurrent, son quotidien (horaires de boulot, sport le "
         "mercredi, amis le jeudi soir, sommeil, alimentation en gros, contraintes).\n"
-        "MESURES = données chiffrées du corps qu'il RAPPORTE (poids, taille, taux "
-        "de gras, tour de bras/taille/cuisse...). metric + valeur + unité.\n"
+        "MESURES = données chiffrées qu'il RAPPORTE : (a) mesures du corps (poids, "
+        "taille, taux de gras, tour de bras/taille/cuisse...) ; (b) CHARGES PAR EXERCICE "
+        "— quand il dit combien il soulève sur un exo ('au développé couché j'ai mis "
+        "60kg', 'squat 80'), metric = LE NOM DE L'EXERCICE (ex. 'développé couché'), "
+        "value = la charge, unit = 'kg'. metric + valeur + unité.\n"
         "WORKOUTS = une SÉANCE dont il PARLE au passé : session_name (ce qu'il a fait), "
         "feeling (ressenti en mots), notes, intensity (INTENSITÉ RESSENTIE sur 10 — RPE : "
         "déduis-la de ses mots si pas de chiffre — 'tranquille/facile'~3, 'correct'~5, "

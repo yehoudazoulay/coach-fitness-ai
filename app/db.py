@@ -374,6 +374,15 @@ def recent_workouts(user_id: int, limit: int = 30) -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def workouts_done_count(user_id: int) -> int:
+    """Nombre TOTAL de séances faites (pour la relance 'point charges' périodique)."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) AS c FROM workouts WHERE user_id = ? AND done = 1",
+            (user_id,),
+        ).fetchone()["c"]
+
+
 def sessions_this_week(user_id: int) -> int:
     """Nombre de séances FAITES depuis lundi (semaine en cours)."""
     with get_conn() as conn:

@@ -37,6 +37,7 @@ from .db import (
     measurement_history,
     next_planned_session,
     now_local,
+    recent_workouts,
     save_new_program,
     sessions_this_week,
     update_event,
@@ -58,6 +59,60 @@ def _today_str() -> str:
     now = now_local()
     return (f"{_JOURS[now.weekday()]} {now.day} {_MOIS[now.month - 1]} "
             f"{now.year}, {now:%H:%M}")
+
+
+def _match_seance(session_name: str | None, seances: list[dict]) -> dict | None:
+    """Retrouve QUELLE séance du programme correspond à une séance faite (via son nom
+    ou son jour). Si le programme n'a qu'une séance-type, c'est forcément elle."""
+    if len(seances) == 1:
+        return seances[0]
+    sl = (session_name or "").lower()
+    for s in seances:
+        nom, jour = (s.get("nom") or "").lower(), (s.get("jour") or "").lower()
+        if nom and (nom in sl or sl in nom):
+            return s
+        if jour and jour in sl:
+            return s
+    return None
+
+
+def _loads_status(user_id: int, program_content: str, measurements, every: int):
+    """(à_collecter, à_mettre_à_jour) : exos du programme sans charge connue, et exos
+    faits >= `every` fois depuis leur dernière charge (donc à re-challenger).
+    On DÉDUIT les occurrences par exo du programme (on sait ce que contient chaque
+    séance) croisé avec les séances réellement faites — pas besoin de logguer l'exo."""
+    try:
+        seances = json.loads(program_content).get("seances", [])
+    except Exception:  # noqa: BLE001
+        return [], []
+    exos = []
+    for s in seances:
+        for e in s.get("exos", []):
+            nom = (e.get("exo") or "").strip()
+            if nom and nom not in exos:
+                exos.append(nom)
+    if not exos:
+        return [], []
+    last_load = {m["metric"].strip().lower(): m["measured_at"] for m in measurements}
+    occ: dict[str, list[str]] = {}
+    for w in recent_workouts(user_id, 200):
+        if not w["done"]:
+            continue
+        s = _match_seance(w["session_name"], seances)
+        if not s:
+            continue
+        for e in s.get("exos", []):
+            nom = (e.get("exo") or "").strip().lower()
+            if nom:
+                occ.setdefault(nom, []).append(w["performed_at"])
+    collect, refresh = [], []
+    for exo in exos:
+        el = exo.lower()
+        if el not in last_load:
+            collect.append(exo)
+        elif sum(1 for t in occ.get(el, []) if t > last_load[el]) >= every:
+            refresh.append(exo)
+    return collect, refresh
 
 
 def _dynamic_context(user: sqlite3.Row) -> str:
@@ -116,25 +171,23 @@ def _dynamic_context(user: sqlite3.Row) -> str:
     prog = current_program(user["id"])
     if prog is not None:
         parts.append(f"SON PROGRAMME ACTUEL (v{prog['version']}) : {prog['content']}")
-        # Charges par exo : repère les exos du programme SANS charge enregistrée,
-        # pour que le Sergent aille les chercher (débrief / point charges).
-        try:
-            known = {m["metric"].strip().lower() for m in ms}
-            exos = []
-            for s in json.loads(prog["content"]).get("seances", []):
-                for e in s.get("exos", []):
-                    nom = (e.get("exo") or "").strip()
-                    if nom and nom.lower() not in known and nom not in exos:
-                        exos.append(nom)
-            if exos:
-                parts.append(
-                    "CHARGES À COLLECTER (exos du programme sans charge enregistrée) : "
-                    + ", ".join(exos[:12]) + ". Quand c'est naturel (surtout au débrief, "
-                    "ou s'il fait un exo pour la 1re fois), demande combien il soulève "
-                    "dessus (kg) ET l'intensité ressentie, pour démarrer leur historique. "
-                    "Une fois la charge connue, tu la suis et tu la challenges.")
-        except Exception:  # noqa: BLE001
-            pass
+        # Charges par exo : on DÉDUIT du programme + des séances faites lesquels sont
+        # sans charge (à collecter) ou faits >= N fois depuis leur dernière charge
+        # (à re-challenger). Le Sergent va les chercher au débrief / à la 1re fois.
+        collect, refresh = _loads_status(
+            user["id"], prog["content"], ms, settings.exercise_load_every)
+        if collect:
+            parts.append(
+                "CHARGES À COLLECTER (exos du programme sans charge connue) : "
+                + ", ".join(collect[:12]) + ". Quand c'est naturel (surtout au débrief, "
+                "ou quand il fait l'exo pour la 1re fois), demande combien il soulève "
+                "dessus (kg) ET l'intensité ressentie, pour démarrer leur historique.")
+        if refresh:
+            parts.append(
+                "CHARGES À METTRE À JOUR (déjà faits plusieurs fois depuis la dernière "
+                "charge notée) : " + ", ".join(refresh[:12]) + ". Refais le point : "
+                "combien il met maintenant ? Il doit PROGRESSER — s'il stagne, pousse-le "
+                "à charger.")
 
     # Suivi / adhérence : séances de la semaine vs objectif + dernière séance.
     suivi = []

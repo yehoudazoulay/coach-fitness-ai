@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     quiet_start: int = 22  # 22h
     quiet_end: int = 8     # 8h
 
+    # Charges par exercice : on re-demande la charge d'un exo tous les N passages
+    # (occurrences déduites du programme + des séances faites).
+    exercise_load_every: int = 5
+
     # MODE TEST — accélération du temps, pilotable À CHAUD depuis l'app.
     # time_factor = vitesse AU DÉMARRAGE (1.0 = temps réel).
     # Quand on active l'accéléré (bouton app) : facteur -> accel_factor, cadence

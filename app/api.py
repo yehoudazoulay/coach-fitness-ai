@@ -8,14 +8,19 @@ de vrais users.
 import json
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 
 from . import clock
 from .config import settings
 from .db import (
+    EDITABLE_KINDS,
     active_events,
+    add_event,
+    create_item,
     current_program,
+    delete_event,
+    delete_item,
     fmt_local,
     get_facts,
     get_goals,
@@ -28,6 +33,8 @@ from .db import (
     now_local,
     recent_workouts,
     sessions_this_week,
+    update_event,
+    update_item,
     upcoming_milestones,
 )
 from .flow import run_turn
@@ -97,6 +104,52 @@ def _history_rows(user_id: int, limit: int):
         ).fetchall()[::-1]
 
 
+def _check_kind(kind: str) -> None:
+    if kind not in EDITABLE_KINDS:
+        raise HTTPException(404, f"type éditable inconnu: {kind}")
+
+
+@router.post("/{user}/items/{kind}")
+def create_entry(user: str, kind: str, fields: dict = Body(...)) -> dict:
+    """Crée une entrée de suivi à la main (objectif, mesure, séance, jalon, event…)."""
+    _check_kind(kind)
+    u = get_or_create_user(user)
+    try:
+        if kind == "event":
+            new_id = add_event(u["id"], fields.get("kind", "perso"),
+                               fields.get("content", ""), fields.get("subject"),
+                               fields.get("status", "actif"))
+        else:
+            new_id = create_item(u["id"], kind, fields)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"id": new_id}
+
+
+@router.patch("/{user}/items/{kind}/{item_id}")
+def update_entry(user: str, kind: str, item_id: int, fields: dict = Body(...)) -> dict:
+    """Corrige une entrée de suivi existante."""
+    _check_kind(kind)
+    u = get_or_create_user(user)
+    if kind == "event":
+        update_event(u["id"], item_id, fields.get("status", "actif"),
+                     fields.get("content"))
+        ok = True
+    else:
+        ok = update_item(u["id"], kind, item_id, fields)
+    return {"ok": ok}
+
+
+@router.delete("/{user}/items/{kind}/{item_id}")
+def delete_entry(user: str, kind: str, item_id: int) -> dict:
+    """Supprime une entrée de suivi."""
+    _check_kind(kind)
+    u = get_or_create_user(user)
+    ok = delete_event(u["id"], item_id) if kind == "event" \
+        else delete_item(u["id"], kind, item_id)
+    return {"ok": ok}
+
+
 @router.get("/{user}/workouts")
 def workouts(user: str, limit: int = 30) -> dict:
     """Suivi des séances (pour le chart) : date/heure, faite ou non, intensité, ressenti.
@@ -105,6 +158,7 @@ def workouts(user: str, limit: int = 30) -> dict:
     rows = recent_workouts(u["id"], limit)
     seances = [
         {
+            "id": r["id"],
             "performed_at": r["performed_at"],
             "session_name": r["session_name"],
             "feeling": r["feeling"],
@@ -159,7 +213,8 @@ def dashboard(user: str) -> dict:
             j = (date.fromisoformat(m["target_date"]) - today).days
         except Exception:  # noqa: BLE001
             j = None
-        jalons.append({"label": m["label"], "target_date": m["target_date"], "jours": j})
+        jalons.append({"id": m["id"], "label": m["label"],
+                       "target_date": m["target_date"], "jours": j})
 
     # Progression du poids (série).
     poids = [

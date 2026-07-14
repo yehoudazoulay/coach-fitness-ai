@@ -319,7 +319,7 @@ def latest_measurements(user_id: int) -> list[sqlite3.Row]:
     """La dernière valeur connue de CHAQUE métrique (pour le contexte du coach)."""
     with get_conn() as conn:
         return conn.execute(
-            "SELECT m.metric, m.value, m.unit, m.measured_at FROM measurements m "
+            "SELECT m.id, m.metric, m.value, m.unit, m.measured_at FROM measurements m "
             "JOIN (SELECT metric, MAX(id) AS mid FROM measurements "
             "      WHERE user_id = ? GROUP BY metric) t ON m.id = t.mid "
             "ORDER BY m.metric",
@@ -368,7 +368,7 @@ def recent_workouts(user_id: int, limit: int = 30) -> list[sqlite3.Row]:
     pour le suivi/chart : date, fait ou non, intensité ressentie, ressenti."""
     with get_conn() as conn:
         return conn.execute(
-            "SELECT performed_at, session_name, feeling, intensity, done, notes "
+            "SELECT id, performed_at, session_name, feeling, intensity, done, notes "
             "FROM workouts WHERE user_id = ? ORDER BY performed_at DESC LIMIT ?",
             (user_id, limit),
         ).fetchall()
@@ -432,7 +432,7 @@ def upcoming_milestones(user_id: int) -> list[sqlite3.Row]:
     today = clock.now_utc().date().isoformat()
     with get_conn() as conn:
         return conn.execute(
-            "SELECT label, target_date FROM milestones WHERE user_id = ? "
+            "SELECT id, label, target_date FROM milestones WHERE user_id = ? "
             "AND target_date >= ? ORDER BY target_date",
             (user_id, today),
         ).fetchall()
@@ -724,3 +724,89 @@ def get_facts(user_id: int) -> list[sqlite3.Row]:
             "SELECT id, category, content FROM facts WHERE user_id = ? ORDER BY category, id",
             (user_id,),
         ).fetchall()
+
+
+# --- Édition manuelle depuis l'app : CRUD générique -------------------------
+# Table + colonnes en LISTE BLANCHE (jamais d'entrée utilisateur dans le SQL) ;
+# les valeurs restent paramétrées. Les tables SCD2 (events) ont leur propre chemin.
+
+_EDIT_SPEC = {
+    "goal": {"table": "goals", "fields": {"type", "content", "priority"},
+             "required": {"type", "content"}, "created": ("created_at", "updated_at"),
+             "touch": "updated_at"},
+    "fact": {"table": "facts", "fields": {"category", "content"},
+             "required": {"category", "content"}, "created": ("created_at", "updated_at"),
+             "touch": "updated_at"},
+    "measurement": {"table": "measurements", "fields": {"metric", "value", "unit"},
+                    "required": {"metric", "value"}, "created": ("measured_at",),
+                    "touch": None},
+    "milestone": {"table": "milestones", "fields": {"label", "target_date"},
+                  "required": {"label", "target_date"}, "created": ("created_at",),
+                  "touch": None},
+    "workout": {"table": "workouts",
+                "fields": {"session_name", "feeling", "intensity", "done", "notes",
+                           "performed_at"},
+                "required": set(), "created": ("created_at",), "touch": None,
+                "default_now": ("performed_at",)},
+}
+
+EDITABLE_KINDS = set(_EDIT_SPEC) | {"event"}
+
+
+def create_item(user_id: int, kind: str, fields: dict) -> int:
+    spec = _EDIT_SPEC[kind]
+    now = _now()
+    data = {k: v for k, v in fields.items() if k in spec["fields"] and v is not None}
+    for col in spec.get("default_now", ()):
+        data.setdefault(col, now)
+    missing = spec["required"] - set(data)
+    if missing:
+        raise ValueError(f"champs requis manquants: {sorted(missing)}")
+    for col in spec["created"]:
+        data[col] = now
+    data["user_id"] = user_id
+    cols = ", ".join(data)
+    ph = ", ".join("?" for _ in data)
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"INSERT INTO {spec['table']} ({cols}) VALUES ({ph})", tuple(data.values())
+        )
+        return cur.lastrowid
+
+
+def update_item(user_id: int, kind: str, item_id: int, fields: dict) -> bool:
+    spec = _EDIT_SPEC[kind]
+    data = {k: v for k, v in fields.items() if k in spec["fields"]}
+    if not data:
+        return False
+    if spec["touch"]:
+        data[spec["touch"]] = _now()
+    sets = ", ".join(f"{k} = ?" for k in data)
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"UPDATE {spec['table']} SET {sets} WHERE id = ? AND user_id = ?",
+            (*data.values(), item_id, user_id),
+        )
+        return cur.rowcount > 0
+
+
+def delete_item(user_id: int, kind: str, item_id: int) -> bool:
+    spec = _EDIT_SPEC[kind]
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"DELETE FROM {spec['table']} WHERE id = ? AND user_id = ?",
+            (item_id, user_id),
+        )
+        return cur.rowcount > 0
+
+
+def delete_event(user_id: int, event_key: int) -> bool:
+    """Retire un event de la vue courante (soft-delete SCD2 : is_current = 0)."""
+    now = _now()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE events SET is_current = 0, valid_to = ? "
+            "WHERE user_id = ? AND event_key = ? AND is_current = 1",
+            (now, user_id, event_key),
+        )
+        return cur.rowcount > 0

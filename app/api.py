@@ -32,6 +32,7 @@ from .db import (
     next_planned_session,
     now_local,
     recent_workouts,
+    save_new_program,
     sessions_this_week,
     update_event,
     update_item,
@@ -148,6 +149,20 @@ def delete_entry(user: str, kind: str, item_id: int) -> dict:
     ok = delete_event(u["id"], item_id) if kind == "event" \
         else delete_item(u["id"], kind, item_id)
     return {"ok": ok}
+
+
+@router.post("/{user}/program")
+def save_program(user: str, payload: dict = Body(...)) -> dict:
+    """Enregistre le programme édité à la main (nouvelle version SCD2)."""
+    u = get_or_create_user(user)
+    prog = {
+        "name": (payload.get("name") or "Programme").strip(),
+        "frequence": payload.get("frequence"),
+        "seances": payload.get("seances") or [],
+    }
+    save_new_program(u["id"], json.dumps(prog, ensure_ascii=False),
+                     reason="édité dans l'app")
+    return {"ok": True, "programme": prog}
 
 
 @router.get("/{user}/workouts")

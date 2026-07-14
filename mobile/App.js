@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   SafeAreaView, View, Text, TextInput, TouchableOpacity, ScrollView,
-  ActivityIndicator, StyleSheet, Platform, Keyboard, Modal,
+  ActivityIndicator, StyleSheet, Platform, Keyboard, Modal, KeyboardAvoidingView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
@@ -33,6 +33,7 @@ const saveItem = (kind, id, fields) => id
   ? apiSend(`/api/${U}/items/${kind}/${id}`, 'PATCH', fields)
   : apiSend(`/api/${U}/items/${kind}`, 'POST', fields);
 const deleteItem = (kind, id) => apiSend(`/api/${U}/items/${kind}/${id}`, 'DELETE');
+const saveProgram = (prog) => apiSend(`/api/${U}/program`, 'POST', prog);
 
 // ─────────────────────────────────────────────────────────────────────────
 // Schémas d'édition : quels champs pour chaque type de donnée de suivi.
@@ -170,6 +171,94 @@ function EditModal({ visible, title, kind, id, initial, onClose, onSaved }) {
   );
 }
 
+// Éditeur de programme : nom, fréquence, séances et exercices (ajout/suppression).
+function ProgramEditor({ visible, initial, onClose, onSaved }) {
+  const [name, setName] = useState('');
+  const [freq, setFreq] = useState('');
+  const [seances, setSeances] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    setName(initial?.name || '');
+    setFreq(initial?.frequence != null ? String(initial.frequence) : '');
+    setSeances((initial?.seances || []).map((s) => ({
+      nom: s.nom || '', jour: s.jour || '',
+      exos: (s.exos || []).map((e) => ({
+        exo: e.exo || '', series: e.series != null ? String(e.series) : '', reps: e.reps != null ? String(e.reps) : '',
+      })),
+    })));
+  }, [visible]);
+
+  const edit = (mut) => setSeances((prev) => {
+    const c = prev.map((s) => ({ ...s, exos: s.exos.map((e) => ({ ...e })) }));
+    mut(c); return c;
+  });
+  const save = async () => {
+    const prog = {
+      name: name.trim() || 'Programme',
+      frequence: freq ? Number(freq) : null,
+      seances: seances.map((s) => ({
+        nom: s.nom.trim(), jour: s.jour.trim() || null,
+        exos: s.exos.filter((e) => e.exo.trim()).map((e) => ({
+          exo: e.exo.trim(), series: e.series ? Number(e.series) : null, reps: e.reps.trim(),
+        })),
+      })),
+    };
+    setBusy(true);
+    try { await saveProgram(prog); onSaved(); } catch (e) {} finally { setBusy(false); }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalWrap}>
+        <View style={[styles.modalCard, { maxHeight: '88%' }]}>
+          <Text style={styles.modalTitle}>🏋️ Modifier le programme</Text>
+          <ScrollView keyboardShouldPersistTaps="handled">
+            <Text style={styles.fieldLabel}>Nom</Text>
+            <TextInput style={styles.field} value={name} onChangeText={setName} placeholder="ex. Push / Pull / Legs" placeholderTextColor={C.muted} />
+            <Text style={[styles.fieldLabel, { marginTop: 12 }]}>Séances / semaine</Text>
+            <TextInput style={styles.field} value={freq} onChangeText={setFreq} keyboardType="numeric" placeholder="3" placeholderTextColor={C.muted} />
+
+            {seances.map((s, i) => (
+              <View key={i} style={styles.seanceEdit}>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.seanceEditTitle}>Séance {i + 1}</Text>
+                  <TouchableOpacity onPress={() => edit((c) => c.splice(i, 1))}><Text style={styles.delX}>✕</Text></TouchableOpacity>
+                </View>
+                <TextInput style={styles.field} value={s.nom} onChangeText={(t) => edit((c) => { c[i].nom = t; })} placeholder="Nom (ex. Push)" placeholderTextColor={C.muted} />
+                <TextInput style={[styles.field, { marginTop: 6 }]} value={s.jour} onChangeText={(t) => edit((c) => { c[i].jour = t; })} placeholder="Jour (optionnel)" placeholderTextColor={C.muted} />
+                {s.exos.map((e, j) => (
+                  <View key={j} style={styles.exoRow}>
+                    <TextInput style={[styles.field, styles.exoName]} value={e.exo} onChangeText={(t) => edit((c) => { c[i].exos[j].exo = t; })} placeholder="Exercice" placeholderTextColor={C.muted} />
+                    <TextInput style={[styles.field, styles.exoNum]} value={e.series} onChangeText={(t) => edit((c) => { c[i].exos[j].series = t; })} keyboardType="numeric" placeholder="sér." placeholderTextColor={C.muted} />
+                    <TextInput style={[styles.field, styles.exoNum]} value={e.reps} onChangeText={(t) => edit((c) => { c[i].exos[j].reps = t; })} placeholder="reps" placeholderTextColor={C.muted} />
+                    <TouchableOpacity onPress={() => edit((c) => c[i].exos.splice(j, 1))}><Text style={styles.delX}>✕</Text></TouchableOpacity>
+                  </View>
+                ))}
+                <TouchableOpacity onPress={() => edit((c) => c[i].exos.push({ exo: '', series: '', reps: '' }))} style={styles.miniAdd}>
+                  <Text style={styles.miniAddTxt}>＋ exercice</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+            <TouchableOpacity onPress={() => setSeances((p) => [...p, { nom: '', jour: '', exos: [] }])} style={[styles.addPill, { alignSelf: 'flex-start', marginTop: 14 }]}>
+              <Text style={styles.addPillTxt}>＋ Séance</Text>
+            </TouchableOpacity>
+            <View style={{ height: 10 }} />
+          </ScrollView>
+          <View style={styles.modalBtns}>
+            <View />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity onPress={onClose} style={[styles.mBtn, styles.mCancel]} disabled={busy}><Text style={styles.mCancelTxt}>Annuler</Text></TouchableOpacity>
+              <TouchableOpacity onPress={save} style={[styles.mBtn, styles.mSave]} disabled={busy}><Text style={styles.mSaveTxt}>{busy ? '…' : 'Enregistrer'}</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 // Petit hook : gère l'ouverture de la modale d'édition pour une vue.
 function useEditor(reload) {
   const [ed, setEd] = useState(null); // {kind,title,id,initial}
@@ -217,16 +306,7 @@ function Chat() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [kbHeight, setKbHeight] = useState(0);
   const scrollRef = useRef(null);
-
-  useEffect(() => {
-    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const s = Keyboard.addListener(showEvt, (e) => setKbHeight(e.endCoordinates?.height ?? 0));
-    const h = Keyboard.addListener(hideEvt, () => setKbHeight(0));
-    return () => { s.remove(); h.remove(); };
-  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -253,7 +333,7 @@ function Chat() {
   };
 
   return (
-    <View style={{ flex: 1, marginBottom: Platform.OS === 'ios' ? kbHeight : 0 }}>
+    <View style={{ flex: 1 }}>
       <ScrollView
         ref={scrollRef}
         style={styles.chat}
@@ -296,6 +376,7 @@ function Dashboard() {
   }, []);
   useEffect(() => { load(); }, [load]);
   const { open, node } = useEditor(load);
+  const [progOpen, setProgOpen] = useState(false);
 
   if (loading) return <ActivityIndicator style={{ marginTop: 40 }} color={C.accent} />;
   if (!data) return <Text style={styles.muted}>Impossible de charger (le service Render se réveille peut-être, réessaie dans 1 min).</Text>;
@@ -329,19 +410,25 @@ function Dashboard() {
         <Text style={styles.line}>{data.prochaine_seance ? data.prochaine_seance.scheduled_at.replace('T', ' à ') : 'aucune prévue'}</Text>
       </Card>
 
-      <Card title="🏋️ Programme">
+      <View style={styles.card}>
+        <View style={styles.cardHead}>
+          <Text style={styles.cardTitle}>🏋️ Programme</Text>
+          <TouchableOpacity onPress={() => setProgOpen(true)} style={styles.editPill}>
+            <Text style={styles.editPillTxt}>{data.programme ? '✎ Modifier' : '＋ Créer'}</Text>
+          </TouchableOpacity>
+        </View>
         {data.programme ? (
           <>
             <Text style={styles.bold}>{data.programme.name} — {data.programme.frequence}x/sem</Text>
             {(data.programme.seances || []).map((s, i) => (
               <View key={i} style={{ marginTop: 6 }}>
                 <Text style={styles.bold}>{s.jour ? s.jour + ' — ' : ''}{s.nom}</Text>
-                {(s.exos || []).map((e, j) => <Text key={j} style={styles.muted}>   · {e.exo} {e.series}x{e.reps}</Text>)}
+                {(s.exos || []).map((e, j) => <Text key={j} style={styles.muted}>   · {e.exo} {e.series ? `${e.series}x${e.reps}` : e.reps}</Text>)}
               </View>
             ))}
           </>
         ) : <Text style={styles.muted}>pas encore de programme</Text>}
-      </Card>
+      </View>
 
       <Card title="🏁 Jalons" onAdd={() => open('milestone', 'Nouveau jalon', null)}>
         {(data.jalons || []).map((m, i) => (
@@ -381,6 +468,8 @@ function Dashboard() {
 
       <View style={{ height: 40 }} />
       {node}
+      <ProgramEditor visible={progOpen} initial={data.programme}
+        onClose={() => setProgOpen(false)} onSaved={() => { setProgOpen(false); load(); }} />
     </ScrollView>
   );
 }
@@ -518,22 +607,27 @@ export default function App() {
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
-      <View style={styles.header}>
-        <Text style={styles.headerTxt}>🎖️ LE SERGENT</Text>
-        <ClockBar />
-      </View>
-      <View style={{ flex: 1 }}>
-        {tab === 'chat' ? <Chat /> : tab === 'seances' ? <Seances /> : <Dashboard />}
-      </View>
-      {!(kbd && tab === 'chat') && (
-        <View style={styles.tabs}>
-          {TABS.map(([k, lbl]) => (
-            <TouchableOpacity key={k} style={[styles.tab, tab === k && styles.tabActive]} onPress={() => setTab(k)}>
-              <Text style={[styles.tabTxt, tab === k && styles.tabTxtActive]}>{lbl}</Text>
-            </TouchableOpacity>
-          ))}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.header}>
+          <Text style={styles.headerTxt}>🎖️ LE SERGENT</Text>
+          <ClockBar />
         </View>
-      )}
+        <View style={{ flex: 1 }}>
+          {tab === 'chat' ? <Chat /> : tab === 'seances' ? <Seances /> : <Dashboard />}
+        </View>
+        {!(kbd && tab === 'chat') && (
+          <View style={styles.tabs}>
+            {TABS.map(([k, lbl]) => (
+              <TouchableOpacity key={k} style={[styles.tab, tab === k && styles.tabActive]} onPress={() => setTab(k)}>
+                <Text style={[styles.tabTxt, tab === k && styles.tabTxtActive]}>{lbl}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -576,6 +670,17 @@ const styles = StyleSheet.create({
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   addPill: { backgroundColor: C.accent, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
   addPillTxt: { color: '#14181c', fontWeight: '800', fontSize: 13 },
+  editPill: { borderRadius: 16, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: C.khaki },
+  editPillTxt: { color: C.accent, fontWeight: '800', fontSize: 12 },
+  // Éditeur de programme
+  seanceEdit: { backgroundColor: C.card2, borderRadius: 12, padding: 12, marginTop: 14, borderWidth: 1, borderColor: C.border },
+  seanceEditTitle: { color: C.accent, fontWeight: '800', fontSize: 14, marginBottom: 6 },
+  delX: { color: C.danger, fontSize: 16, fontWeight: '800', paddingHorizontal: 6 },
+  exoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  exoName: { flex: 3 },
+  exoNum: { flex: 1, textAlign: 'center', paddingHorizontal: 4 },
+  miniAdd: { marginTop: 8, alignSelf: 'flex-start' },
+  miniAddTxt: { color: C.khaki, fontWeight: '700', fontSize: 13 },
   // Chart
   chart: { backgroundColor: C.card, borderRadius: 14, paddingVertical: 12, marginTop: 8, borderWidth: 1, borderColor: C.border },
   chartRow: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 10 },

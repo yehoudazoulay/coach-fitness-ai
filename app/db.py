@@ -119,9 +119,11 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS workouts (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id      INTEGER NOT NULL REFERENCES users(id),
-                performed_at TEXT NOT NULL,   -- quand la séance a été faite
+                performed_at TEXT NOT NULL,   -- date/heure de la séance
                 session_name TEXT,            -- ce qu'il a fait ("jambes", "full body"...)
                 feeling      TEXT,            -- ressenti ("bien", "dur", "cramé"...)
+                intensity    INTEGER,         -- intensité ressentie /10 (RPE), NULL si manquée
+                done         INTEGER NOT NULL DEFAULT 1,  -- 1 = faite, 0 = manquée
                 notes        TEXT,            -- note libre
                 created_at   TEXT NOT NULL
             );
@@ -211,6 +213,13 @@ def init_db() -> None:
                 conn.execute(f"ALTER TABLE events ADD COLUMN {ddl}")
         conn.execute("UPDATE events SET event_key = id WHERE event_key IS NULL")
         conn.execute("UPDATE events SET valid_from = created_at WHERE valid_from IS NULL")
+
+        # Migration douce : intensité ressentie + flag fait/manquée sur les séances.
+        wcols = [r[1] for r in conn.execute("PRAGMA table_info(workouts)")]
+        if "intensity" not in wcols:
+            conn.execute("ALTER TABLE workouts ADD COLUMN intensity INTEGER")
+        if "done" not in wcols:
+            conn.execute("ALTER TABLE workouts ADD COLUMN done INTEGER NOT NULL DEFAULT 1")
 
 
 def _now() -> str:
@@ -341,31 +350,46 @@ def _week_start_iso() -> str:
 def log_workout(
     user_id: int, session_name: str | None = None, feeling: str | None = None,
     notes: str | None = None, performed_at: str | None = None,
+    intensity: int | None = None, done: bool = True,
 ) -> int:
     now = _now()
     with get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO workouts (user_id, performed_at, session_name, feeling, "
-            "notes, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, performed_at or now, session_name, feeling, notes, now),
+            "intensity, done, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, performed_at or now, session_name, feeling,
+             intensity, 1 if done else 0, notes, now),
         )
         return cur.lastrowid
 
 
-def sessions_this_week(user_id: int) -> int:
-    """Nombre de séances faites depuis lundi (semaine en cours)."""
+def recent_workouts(user_id: int, limit: int = 30) -> list[sqlite3.Row]:
+    """Historique des séances (faites ET manquées), plus récentes d'abord —
+    pour le suivi/chart : date, fait ou non, intensité ressentie, ressenti."""
     with get_conn() as conn:
         return conn.execute(
-            "SELECT COUNT(*) AS c FROM workouts WHERE user_id = ? AND performed_at >= ?",
+            "SELECT performed_at, session_name, feeling, intensity, done, notes "
+            "FROM workouts WHERE user_id = ? ORDER BY performed_at DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+
+
+def sessions_this_week(user_id: int) -> int:
+    """Nombre de séances FAITES depuis lundi (semaine en cours)."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) AS c FROM workouts "
+            "WHERE user_id = ? AND done = 1 AND performed_at >= ?",
             (user_id, _week_start_iso()),
         ).fetchone()["c"]
 
 
 def last_workout(user_id: int) -> sqlite3.Row | None:
+    """Dernière séance RÉELLEMENT faite (done=1) — sert à l'inactivité/adhérence."""
     with get_conn() as conn:
         return conn.execute(
             "SELECT performed_at, session_name, feeling, notes FROM workouts "
-            "WHERE user_id = ? ORDER BY performed_at DESC LIMIT 1",
+            "WHERE user_id = ? AND done = 1 ORDER BY performed_at DESC LIMIT 1",
             (user_id,),
         ).fetchone()
 

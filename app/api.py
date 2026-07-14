@@ -26,6 +26,7 @@ from .db import (
     measurement_history,
     next_planned_session,
     now_local,
+    recent_workouts,
     sessions_this_week,
     upcoming_milestones,
 )
@@ -94,6 +95,25 @@ def _history_rows(user_id: int, limit: int):
             "ORDER BY id DESC LIMIT ?",
             (user_id, limit),
         ).fetchall()[::-1]
+
+
+@router.get("/{user}/workouts")
+def workouts(user: str, limit: int = 30) -> dict:
+    """Suivi des séances (pour le chart) : date/heure, faite ou non, intensité, ressenti.
+    Renvoyé du plus ANCIEN au plus récent (ordre chronologique pour le graphique)."""
+    u = get_or_create_user(user)
+    rows = recent_workouts(u["id"], limit)
+    seances = [
+        {
+            "performed_at": r["performed_at"],
+            "session_name": r["session_name"],
+            "feeling": r["feeling"],
+            "intensity": r["intensity"],
+            "done": bool(r["done"]),
+        }
+        for r in reversed(rows)  # chronologique
+    ]
+    return {"seances": seances}
 
 
 @router.get("/{user}/dashboard")

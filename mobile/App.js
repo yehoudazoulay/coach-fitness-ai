@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   SafeAreaView, View, Text, TextInput, TouchableOpacity, ScrollView,
-  ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform, Keyboard,
+  ActivityIndicator, StyleSheet, Platform, Keyboard,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
@@ -227,6 +227,75 @@ function Dashboard() {
   );
 }
 
+function Seances() {
+  const [seances, setSeances] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    api(`/api/${encodeURIComponent(USER)}/workouts?limit=40`)
+      .then((d) => setSeances(d.seances || [])).catch(() => setSeances(null)).finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <ActivityIndicator style={{ marginTop: 40 }} color={OLIVE} />;
+  if (!seances) return <Text style={styles.muted}>Impossible de charger (le service Render se réveille peut-être, réessaie).</Text>;
+
+  const MAX_H = 120;
+  const barColor = (n) => (n >= 8 ? '#c0392b' : n >= 5 ? '#e08e0b' : '#4a7c1f');
+  const d2 = (n) => String(n).padStart(2, '0');
+  const fmtDay = (iso) => { const d = new Date(iso); return `${d2(d.getDate())}/${d2(d.getMonth() + 1)}`; };
+  const fmtFull = (iso) => new Date(iso).toLocaleString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
+      <TouchableOpacity onPress={load} style={styles.refresh}><Text style={styles.refreshTxt}>↻ Rafraîchir</Text></TouchableOpacity>
+
+      <Text style={styles.cardTitle}>📈 Intensité ressentie (/10)</Text>
+      {seances.length === 0 ? (
+        <Text style={styles.muted}>Aucune séance pour l'instant. Parle de tes séances au Sergent (faite ou pas, comment c'était) — ça se remplit tout seul.</Text>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chart}>
+          <View style={styles.chartRow}>
+            {seances.map((s, i) => {
+              const h = s.done && s.intensity ? (s.intensity / 10) * MAX_H : 0;
+              return (
+                <View key={i} style={styles.col}>
+                  <Text style={styles.barVal}>{s.done ? (s.intensity ?? '✓') : ''}</Text>
+                  <View style={[styles.barTrack, { height: MAX_H }]}>
+                    {s.done ? (
+                      <View style={[styles.bar, { height: Math.max(h, 8), backgroundColor: s.intensity ? barColor(s.intensity) : '#bbb' }]} />
+                    ) : (
+                      <Text style={styles.missedMark}>✗</Text>
+                    )}
+                  </View>
+                  <Text style={styles.barDate}>{fmtDay(s.performed_at)}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </ScrollView>
+      )}
+      <Text style={styles.legend}>Vert = léger · Orange = soutenu · Rouge = très dur · ✗ = séance manquée</Text>
+
+      <Text style={[styles.cardTitle, { marginTop: 20 }]}>🗒️ Historique des séances</Text>
+      {[...seances].reverse().map((s, i) => (
+        <View key={i} style={styles.seanceCard}>
+          <View style={styles.seanceHead}>
+            <Text style={styles.seanceDate}>{fmtFull(s.performed_at)}</Text>
+            <Text style={s.done ? styles.badgeOk : styles.badgeKo}>{s.done ? '✅ Faite' : '❌ Manquée'}</Text>
+          </View>
+          {s.done && s.intensity != null && <Text style={styles.seanceInt}>Intensité : {s.intensity}/10</Text>}
+          {(s.session_name || s.feeling) ? (
+            <Text style={styles.muted}>{s.session_name || 'séance'}{s.feeling ? ` — « ${s.feeling} »` : ''}</Text>
+          ) : null}
+        </View>
+      ))}
+      <View style={{ height: 40 }} />
+    </ScrollView>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState('chat');
   const [kbd, setKbd] = useState(false);
@@ -246,11 +315,16 @@ export default function App() {
         <Text style={styles.headerTxt}>🎖️ Le Sergent</Text>
         <ClockBar />
       </View>
-      <View style={{ flex: 1 }}>{tab === 'chat' ? <Chat /> : <Dashboard />}</View>
+      <View style={{ flex: 1 }}>
+        {tab === 'chat' ? <Chat /> : tab === 'seances' ? <Seances /> : <Dashboard />}
+      </View>
       {!(kbd && tab === 'chat') && (
         <View style={styles.tabs}>
           <TouchableOpacity style={[styles.tab, tab === 'chat' && styles.tabActive]} onPress={() => setTab('chat')}>
             <Text style={[styles.tabTxt, tab === 'chat' && styles.tabTxtActive]}>💬 Chat</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.tab, tab === 'seances' && styles.tabActive]} onPress={() => setTab('seances')}>
+            <Text style={[styles.tabTxt, tab === 'seances' && styles.tabTxtActive]}>📈 Séances</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.tab, tab === 'dashboard' && styles.tabActive]} onPress={() => setTab('dashboard')}>
             <Text style={[styles.tabTxt, tab === 'dashboard' && styles.tabTxtActive]}>📊 Suivi</Text>
@@ -295,4 +369,20 @@ const styles = StyleSheet.create({
   tabTxtActive: { color: OLIVE, fontWeight: '700' },
   refresh: { alignSelf: 'flex-end', marginBottom: 8 },
   refreshTxt: { color: OLIVE, fontWeight: '600' },
+  // Suivi des séances (chart + historique)
+  chart: { backgroundColor: '#fff', borderRadius: 12, paddingVertical: 12, marginTop: 8 },
+  chartRow: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 10 },
+  col: { alignItems: 'center', width: 34 },
+  barVal: { fontSize: 11, color: '#555', height: 14, fontWeight: '700' },
+  barTrack: { width: '100%', justifyContent: 'flex-end', alignItems: 'center' },
+  bar: { width: 16, borderRadius: 4 },
+  missedMark: { color: '#c0392b', fontSize: 16, fontWeight: '800' },
+  barDate: { fontSize: 9, color: '#999', marginTop: 4 },
+  legend: { fontSize: 11, color: '#888', marginTop: 8, fontStyle: 'italic' },
+  seanceCard: { backgroundColor: '#fff', borderRadius: 10, padding: 12, marginTop: 8 },
+  seanceHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  seanceDate: { fontSize: 13, color: '#333', fontWeight: '600', textTransform: 'capitalize' },
+  badgeOk: { fontSize: 12, color: '#2e7d32', fontWeight: '700' },
+  badgeKo: { fontSize: 12, color: '#c0392b', fontWeight: '700' },
+  seanceInt: { fontSize: 13, color: OLIVE, fontWeight: '700', marginTop: 4 },
 });

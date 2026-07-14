@@ -233,8 +233,9 @@ _PROACTIVE_INSTR = {
     ),
     "debrief": (
         "TU ÉCRIS EN PREMIER — DÉBRIEF POST-SÉANCE. Sa séance vient de passer : "
-        "demande, dans TA voix, comment ça s'est passé (si elle l'a faite ou pas), puis "
-        "ENCHAÎNE en lui demandant c'est quand sa PROCHAINE séance. Court."
+        "demande, dans TA voix, si elle l'a FAITE ou pas et comment ça s'est passé — et "
+        "réclame l'INTENSITÉ ressentie sur 10 ('tu la mets à combien sur 10, cette "
+        "séance ?'). Puis ENCHAÎNE en lui demandant c'est quand sa PROCHAINE séance. Court."
     ),
     "inactivity": (
         "TU ÉCRIS EN PREMIER — RELANCE D'ASSIDUITÉ. Ça fait un moment qu'il n'a pas "
@@ -360,8 +361,12 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
         "mercredi, amis le jeudi soir, sommeil, alimentation en gros, contraintes).\n"
         "MESURES = données chiffrées du corps qu'il RAPPORTE (poids, taille, taux "
         "de gras, tour de bras/taille/cuisse...). metric + valeur + unité.\n"
-        "WORKOUTS = une SÉANCE qu'il dit avoir FAITE (pas prévue) : session_name (ce "
-        "qu'il a fait), feeling (ressenti), notes.\n"
+        "WORKOUTS = une SÉANCE dont il PARLE au passé : session_name (ce qu'il a fait), "
+        "feeling (ressenti en mots), notes, intensity (INTENSITÉ RESSENTIE sur 10 — RPE : "
+        "déduis-la de ses mots si pas de chiffre — 'tranquille/facile'~3, 'correct'~5, "
+        "'dur/bien transpiré'~7, 'cramé/à fond/mort'~9 ; null si vraiment aucune idée), "
+        "done (true = il l'a FAITE ; false = il dit l'avoir MANQUÉE/sautée/pas faite). "
+        "Une séance manquée se log AUSSI (done=false, intensity=null).\n"
         "MILESTONES = une échéance DATÉE importante (mariage, compétition, deadline "
         "d'objectif). label + target_date au format AAAA-MM-JJ (résous les dates "
         "relatives/ambiguës avec la date du jour).\n"
@@ -395,7 +400,8 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
         ' "fact_updates": [{"fact_id": <int>, "content": "phrase mise à jour"}],\n'
         ' "new_measurements": [{"metric": "poids|taille|taux_gras|tour_bras|'
         'tour_taille|...", "value": <nombre>, "unit": "kg|cm|%"}],\n'
-        ' "new_workouts": [{"session_name": "...", "feeling": "...", "notes": "..."}],\n'
+        ' "new_workouts": [{"session_name": "...", "feeling": "...", "intensity": <1-10|null>, '
+        '"done": true, "notes": "..."}],\n'
         ' "new_milestones": [{"label": "...", "target_date": "AAAA-MM-JJ"}],\n'
         ' "next_session": {"scheduled_at": "AAAA-MM-JJTHH:MM", "session_name": "..."}}\n'
         "(next_session = null si aucune séance future n'est annoncée dans le message). "
@@ -455,8 +461,12 @@ def update_memory(user_id: int, history: list[dict]) -> list[dict]:
             add_measurement(user_id, metric, float(value), m.get("unit"))
             changes.append({"action": "mesure+", "metric": metric, "value": value})
     for w in data.get("new_workouts", []):
+        inten = w.get("intensity")
+        inten = int(inten) if isinstance(inten, (int, float)) else None
+        done = w.get("done", True) is not False  # défaut = faite
         log_workout(user_id, session_name=w.get("session_name"),
-                    feeling=w.get("feeling"), notes=w.get("notes"))
+                    feeling=w.get("feeling"), notes=w.get("notes"),
+                    intensity=inten, done=done)
         changes.append({"action": "workout+", "session": w.get("session_name")})
     for m in data.get("new_milestones", []):
         label, td = (m.get("label") or "").strip(), (m.get("target_date") or "").strip()

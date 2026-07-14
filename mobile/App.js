@@ -253,7 +253,7 @@ function Chat() {
   };
 
   return (
-    <View style={{ flex: 1, marginBottom: kbHeight }}>
+    <View style={{ flex: 1, marginBottom: Platform.OS === 'ios' ? kbHeight : 0 }}>
       <ScrollView
         ref={scrollRef}
         style={styles.chat}

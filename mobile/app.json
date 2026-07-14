@@ -4,10 +4,10 @@
     "slug": "coach-fitness-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": { "supportsTablet": true },
-    "android": {},
+    "android": { "softwareKeyboardLayoutMode": "resize" },
     "web": {}
   }
 }
